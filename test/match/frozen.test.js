@@ -324,3 +324,27 @@ test('a verification in flight is held across a freeze and settles the field aft
   assert.deepEqual(h.logs.error, [], 'no error logged');
   m.dispose();
 });
+
+// UNITE is a battle phase the freeze gate used to miss (audit fragment 2, 2026-10-15): `clientCombat.js
+// _maybeFieldsDone` completes a 联防 round with COMBAT / FINAL_ASSAULT / HIDDEN_CORE, so a 联防 whose volunteers all
+// vanish must hold like any other battle — otherwise the server plays that round out for nobody. The gate itself is
+// what changed, so the phase is taken directly rather than played into (a 联防 round needs a specific content setup).
+test('a 联防 (UNITE) battle is held too: the freeze gate covers every phase _maybeFieldsDone treats as a battle', () => {
+  const h = coopInCombat();
+  const m = h.m;
+  const f = m.fields.find((x) => x.live && !x.done);
+  assert.ok(f, 'a live field');
+  const phase = m.phase;
+  m.phase = PHASE.UNITE;
+  assert.deepEqual(m.setFrozen(true), { ok: true }, 'UNITE is a battle phase: the hold is accepted');
+  assert.equal(m.frozen, true);
+  assert.equal(m.paused, true);
+  m.sched.advance(3000);
+  assert.equal(m._clockNow(), m.frozenAt, 'the field clock reads the hold instant');
+  assert.deepEqual(m.setFrozen(false), { ok: true });
+  m.phase = phase;
+  assert.equal(m.frozen, false);
+  h.runToEnd();
+  assert.deepEqual(h.logs.error, [], 'no error logged');
+  m.dispose();
+});

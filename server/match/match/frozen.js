@@ -24,7 +24,9 @@ export const FROZEN_MS = 10 * 60_000;
 
 /** The phases a volunteer-freeze may hold (the same battle phases the solo pause may). */
 function isBattlePhase(phase) {
-  return phase === PHASE.COMBAT || phase === PHASE.FINAL_ASSAULT || phase === PHASE.HIDDEN_CORE;
+  // UNITE is a battle phase too (clientCombat.js _maybeFieldsDone completes it with the other three): a 联防 round
+  // whose volunteers all vanish must hold like any other battle.
+  return phase === PHASE.COMBAT || phase === PHASE.UNITE || phase === PHASE.FINAL_ASSAULT || phase === PHASE.HIDDEN_CORE;
 }
 
 export class MatchFrozen {
