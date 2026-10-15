@@ -1,0 +1,32 @@
+{
+  "_comment": "边缘层的分流表。容器的 /assets/** 与 /fonts/** 按这里的顺序 302 出去，字节从不落在容器上。镜像对应：r2 = 第一镜像（weishucdn）；openi = 第二镜像（OpenI，浏览器 CORS 不可用，仅 ?sp_source=openi 点名可达）；modelscope = 第三镜像（ModelScope 创空间）的 HTTP 运行时形态——创空间 cdn 分支本身无文件直链、只作 git 镜像，其同族数据集即本条目，也是默认 302 目标。",
+  "_order_note": "这是静态顺序，不是实时测速：容器在 ModelScope 机房，玩家在全国各地，容器量出来的链路速度不代表玩家的。真正按玩家网络选最快是客户端 pick.js 的事，两者分工。客户端可用 ?sp_source=<id> 覆盖这里的顺序。",
+  "_order_basis": "顺序按直连实测（本机 --noproxy，非代理）：小文件 TTFB modelscope 0.21s / r2 0.66s；855 KB 大文件 modelscope 0.26s(3.3 MB/s) / r2 1.9s(0.4 MB/s)。",
+  "_order_reason": "2026-10-13 用户指令：魔搭部署也优先 weishucdn。weishucdn(r2) 是同一个 R2 桶的规范入口，内容最全（例如官方战场场景在数据集镜像补齐之前它就已经有）；modelscope 数据集是第二顺位。注意 rank 只能在这些已配置源之间重排，不会把列表外的源拉进来。",
+  "schemaVersion": 1,
+  "order": [
+    "r2",
+    "modelscope"
+  ],
+  "sources": [
+    {
+      "id": "modelscope",
+      "base": "https://modelscope.cn/datasets/jingjiangze/Stronghold-Protocol-Assets/resolve/master/releases/v1-trial",
+      "note": "自建数据集镜像（公开；= 第三镜像 ModelScope 创空间 的运行时入口，见本文件 _comment）。15,979 assets + 7 fonts，逐字节校验过，Range 返 206，ACAO 可用，直连比 r2 快约 3×。**不钉 40hex**（2026-10-11 决定）：镜像还在追加文件，钉死后新素材要等换版才可见；路径本身不变，可变 master 不会让同一路径指向不同内容。"
+    },
+    {
+      "id": "r2",
+      "base": "https://weishucdn.jiangjiangze.icu",
+      "note": "现有主源（R2 私有桶 + 自有域）。作为兜底，并且是下面 exceptions 的目标。"
+    },
+    {
+      "id": "openi",
+      "base": "https://openi.pcl.ac.cn/jingjiangze/Stronghold-Protocol/raw/branch/assets-raw",
+      "note": "启智镜像（每天四次推送，素材树 915 MiB）。**故意不在 order 里**：它快（TTFB 0.21s）但 ACAO 写死成第三方域 experience.pro.iflyaicloud.com 且不反射请求方，二进制还忽略 Range（png 返 200 而非 206）——浏览器跨域取 WebGL 贴图会被 CORS 拒绝、并把画布污染成白屏（见记忆 web-cdn-art-webgl-taint）。只作**显式指定**的通道：客户端/工具确知自己不需要 CORS 时用 ?sp_source=openi。详见 cdn 仓 docs/audit/openi-cors-bypass.md。"
+    }
+  ],
+  "_exceptions_note": "数据集不是逐字节完整的：ModelScope 的内容审核会拒收个别文件（实测拒了 char_340_shwaz_snow_1/illustration.png，提交被平台 reverted）。这些路径必须落到别的源，否则玩家拿到 404。Stardust 的 material-lb 有同一张表（MATERIAL-SOURCES.md 里是同一个文件的同一条例外），说明这是会复发的类型，不是一次性事故。",
+  "exceptions": {
+    "/assets/skins/char_340_shwaz_snow_1/illustration.png": "r2"
+  }
+}

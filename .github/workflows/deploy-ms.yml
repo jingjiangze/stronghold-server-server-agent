@@ -1,0 +1,114 @@
+name: deploy-ms
+
+# 叠加式上游自动同步链：上游 pristine + 声明式叠加层（tools/deploy-ms/overlay.json）→ ms 部署树 → 创空间重启。
+# 触发：upstream-tick Worker 在上游真变化时 repository_dispatch；也可手动 dispatch。
+# 三条门控在 push 之前：①上游漂移（baseSha）②树形自证（diff 必须全在清单内）③最小冒烟；失败必须响，不静默。
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_sha:
+        description: '上游 commit SHA（默认：sganggs/Stronghold-Protocol master 最新）'
+        required: false
+  repository_dispatch:
+    types: [upstream-release, upstream-commit]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-ms
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      UPSTREAM_REPO: sganggs/Stronghold-Protocol
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve upstream SHA
+        id: up
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.event.inputs.upstream_sha || github.event.client_payload.sha || '' }}"
+          if [ -z "$SHA" ]; then
+            SHA="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/$UPSTREAM_REPO/commits/master | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).sha))')"
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "upstream = $SHA"
+
+      - name: Fetch upstream tree objects
+        run: |
+          git remote add up "https://$GITHUB_TOKEN@github.com/$UPSTREAM_REPO.git"
+          git fetch --depth=1 up "${{ steps.up.outputs.sha }}"
+          git update-ref refs/upstream-master "${{ steps.up.outputs.sha }}"
+
+      - name: Gate 1+2 — build tree with drift checks
+        run: node tools/deploy-ms/build-tree.mjs --upstream "${{ steps.up.outputs.sha }}" --out /tmp/deploy-tree.txt
+
+      - name: Gate 3 — minimal smoke (syntax + route strings)
+        run: |
+          node -e '
+            const fs=require("fs"),cp=require("child_process");
+            const o=JSON.parse(fs.readFileSync("tools/deploy-ms/overlay.json","utf8"));
+            for (const e of o.entries) if (/\.m?js$/.test(e.path) && e.kind!=="generated") {
+              const src=fs.readFileSync(e.from.startsWith("/")?e.from:e.from,"utf8");
+              if (!/^\s*\/\*|^\s*\/\//.test(src)) throw new Error("odd file head: "+e.path);
+              if (/export (default|async function startServer)|require\(/.test(src)) {
+                cp.execFileSync(process.execPath,["--check","-"],{input:src});
+              }
+            }
+            const st=fs.readFileSync("tools/deploy-ms/patched/server__http__static.js","utf8");
+            for (const route of ["/sp-edge/status","/sp-edge/upstream"]) if (!st.includes(route)) throw new Error("route missing: "+route);
+            console.log("smoke ok");
+          '
+
+      - name: Commit tree onto ms/master and push
+        env:
+          MS_TOKEN: ${{ secrets.MS_TOKEN }}
+        run: |
+          TREE="$(cat /tmp/deploy-tree.txt)"
+          git remote add ms "https://oauth2:$MS_TOKEN@www.modelscope.cn/studios/jingjiangze/Stronghold-Protocol.git"
+          git fetch --depth=1 ms master
+          PARENT="$(git ls-remote ms refs/heads/master | cut -f1)"
+          MSG="deploy(ms): 上游 ${{ steps.up.outputs.sha }} + 声明式叠加层（自动同步链）
+          
+          由 ${{ github.event_name }} 触发。内容 = 上游 pristine + tools/deploy-ms/overlay.json 声明的
+          15 个叠加文件（含 data/local-assets.json 场景清单，generated-from-upstream）。
+          门控：上游漂移(baseSha)/树形自证/冒烟 全部通过。"
+          NEW="$(git commit-tree "$TREE" -p "$PARENT" -m "$MSG")"
+          echo "new ms commit: $NEW"
+          git push ms "$NEW:refs/heads/master"
+
+      - name: Restart the studio and wait for Running
+        env:
+          MS_TOKEN: ${{ secrets.MS_TOKEN }}
+        run: |
+          BASE="https://www.modelscope.cn/api/v1/studio/jingjiangze/Stronghold-Protocol"
+          code="$(curl -sS -o /tmp/rr.json -w '%{http_code}' -X PUT -H "authorization: Bearer $MS_TOKEN" -H 'content-type: application/json' -d '{}' "$BASE/reset_restart")"
+          echo "reset_restart -> $code"; [ "$code" = "200" ] || { cat /tmp/rr.json; exit 1; }
+          for i in $(seq 1 30); do
+            sleep 20
+            S="$(curl -sS -H "authorization: Bearer $MS_TOKEN" "$BASE/status" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).Data.Status||"?")}catch{console.log("?")}})')"
+            echo "status: $S"
+            [ "$S" = "Running" ] && exit 0
+          done
+          echo "studio did not reach Running in time"; exit 1
+
+      - name: Verify edge + healthz live
+        run: |
+          sleep 15
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124 Safari/537.36"
+          H=$(curl -sS -H "user-agent: $UA" https://jingjiangze-stronghold-protocol.ms.show/healthz)
+          echo "$H" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);if(j.ok!==true||!Number.isInteger(j.version))throw new Error("healthz contract broken");console.log("healthz ok, app="+j.app)})'
+          S=$(curl -sS -H "user-agent: $UA" https://jingjiangze-stronghold-protocol.ms.show/sp-edge/status)
+          echo "$S" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);if(!Array.isArray(j.order)||!j.order.length)throw new Error("sp-edge broken");console.log("sp-edge order="+j.order.join(">"))})'

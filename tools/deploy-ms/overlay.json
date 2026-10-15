@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "_comment": "叠加式部署树声明清单：上游 pristine + 这些文件 = ms 部署树（线上容器的内容）。kind: add=上游没有的新文件（从本仓 HEAD 取）；patch=上游有但我们改过（从 tools/deploy-ms/patched/ 取，baseSha=上游原 blob，上游一动即门控指名失败）；generated=生成物（按上游重算）。",
+  "_invariants": [
+    "data/local-assets.json 标 generated-from-upstream：上游 stages.json 变化 ⇒ 按上游重算（提取工具 tools/local-extract/scenes.py），不从工作树抄",
+    "凡 patched 条目必须在 workflow 门控里核对 baseSha（build-tree.mjs 已实现）",
+    "build-tree.mjs 的树形自证：diff(upstream,tree) 中任何不在本清单内的差异都算失败"
+  ],
+  "entries": [
+    { "path": "deploy/stardust/ms-edge/nginx.conf",      "kind": "add",   "from": "deploy/stardust/ms-edge/nginx.conf",      "note": "容器边缘层 nginx（创空间平台上实际不执行 CMD，仅保留形态）" },
+    { "path": "deploy/stardust/ms-edge/edge-sidecar.mjs","kind": "add",   "from": "deploy/stardust/ms-edge/edge-sidecar.mjs","note": "分流纯函数（白名单/路径校验/例外表/sp_source），与进程内跳转共用" },
+    { "path": "deploy/stardust/ms-edge/render-nginx.mjs","kind": "add",   "from": "deploy/stardust/ms-edge/render-nginx.mjs","note": "nginx 配置渲染器" },
+    { "path": "deploy/stardust/ms-edge/sources.json",    "kind": "add",   "from": "deploy/stardust/ms-edge/sources.json",    "note": "源表与顺序（r2=weishucdn 打头，modelscope 第二；openi 仅显式）" },
+    { "path": "deploy/stardust/ms-edge/entrypoint.sh",   "kind": "add",   "from": "deploy/stardust/ms-edge/entrypoint.sh",   "note": "容器入口" },
+    { "path": "server/http/asset-jump.js",               "kind": "add",   "from": "server/http/asset-jump.js",               "note": "进程内素材 302：rank 合格集+多门牌回退+非空优先+源健康顺延+后备清单" },
+    { "path": "server/mirrorProbe.js",                   "kind": "add",   "from": "server/mirrorProbe.js",                   "note": "容器视角抽样测速（每次不同素材/大小分类/缺失表）——跳转层证据源" },
+    { "path": "server/upstreamWatch.js",                 "kind": "add",   "from": "server/upstreamWatch.js",                 "note": "容器内上游监听（无 SP_UPSTREAM_TOKEN 时 observe-only）" },
+    { "path": "server/healthMetrics.js",                 "kind": "add",   "from": "server/healthMetrics.js",                 "note": "/healthz 性能指标" },
+    { "path": "data/local-assets.json",                  "kind": "generated", "from": "data/local-assets.json",              "note": "generated-from-upstream：战场场景清单（当前 12 组；escaped 两关待补→14 组）" },
+    { "path": "Dockerfile",                              "kind": "patch", "from": "tools/deploy-ms/Dockerfile.ms",           "baseSha": "33b45355d6cfa71054075ebb54b6876ea57902d1", "note": "平台适配（创空间构建）" },
+    { "path": "server/http/files.js",                    "kind": "patch", "from": "tools/deploy-ms/patched/server__http__files.js",   "baseSha": "a9ed003fa57247e164e730cc8219ce15dd0bb92e", "note": "去 br（ms.show 边缘丢 Content-Encoding: br）" },
+    { "path": "server/http/static.js",                   "kind": "patch", "from": "tools/deploy-ms/patched/server__http__static.js",  "baseSha": "31b6de3d4f8941dfeee8b5c2096fb9ff21114f9c", "note": "/sp-edge/* 只读路由 + assetJump 接线" },
+    { "path": "server/http/routes.js",                   "kind": "patch", "from": "tools/deploy-ms/patched/server__http__routes.js",  "baseSha": "fe3f505d2d1dac6d96e141cb0882f3096876f0cd", "note": "路由补丁" },
+    { "path": "server/index.js",                         "kind": "patch", "from": "tools/deploy-ms/patched/server__index.js",         "baseSha": "9d2f9943825032396b994227706b68064f17067a", "note": "装配接线（跳转/健康/监听/测速）" }
+  ]
+}
