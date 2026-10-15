@@ -750,6 +750,16 @@ describe('result', () => {
     assert.equal(empty.victory, false); assert.deepEqual(empty.players, []); assert.equal(empty.lastRound, 14);
     assert.equal(normalizeResult({ players: [{ playerId: 'x', roundsPassed: 9 }] }, null).roundsPassed, 9);
   });
+
+  // An abandoned volunteer-freeze arrives as victory:false, like a lost defence — the screen can only tell them apart
+  // through `reason` (frozen.js _frozenExpire → settle.js finish). It used to be dropped here, so the result screen
+  // had nothing to read and printed 模拟失败 / 防线已被突破 for a match nobody came back to.
+  test('normalizeResult keeps the reason, so an abandoned freeze is not shown as a lost defence', () => {
+    assert.equal(normalizeResult({ victory: false, reason: 'abandoned' }, null).reason, 'abandoned');
+    assert.equal(normalizeResult({ victory: false, reason: 'defeat' }, null).reason, 'defeat');
+    assert.equal(normalizeResult({ victory: false }, null).reason, null, 'a payload without one stays null, never a guess');
+    assert.equal(normalizeResult({ victory: false, reason: 7 }, null).reason, null, 'a non-string is not a reason');
+  });
 });
 
 describe('prepCamera (research 09 §1.2: the Final Assault prep on the own half of the boss field)', () => {

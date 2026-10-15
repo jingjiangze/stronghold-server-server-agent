@@ -4,6 +4,7 @@
 //
 // Expected m.result (free-form in DESIGN §8.2; fields read tolerantly, see gameLogic.normalizeResult):
 //   { victory, roundsPassed, lastRound?, hiddenCleared?, bossId?, hiddenBossId?, difficulty?, modeId?, durationMs?,
+//     reason? /* 'defeat' | 'eliminated' | 'abandoned': an abandoned volunteer-freeze reads differently, frozen.js */,
 //     players: [{ playerId, seat, name, isBot, alive, lp, bandId, roundsPassed?,
 //                 title: 'comment_1' | { id, name? } | null,
 //                 lineup: [{ id /* chessId, golden id if elite */, golden?, tier?, items?: [itemId],
@@ -121,6 +122,9 @@ export function ResultScreen() {
 export function ResultView({ res, pub = null, myId = null, backLabel, onBack, quiet = false }) {
   const gd = useGameData();
   const r = normalizeResult(res, pub);
+  // an abandoned volunteer-freeze is a defeat in the payload (victory:false) but not a lost defence: nobody came back,
+  // so the headline must not claim the line was breached (frozen.js _frozenExpire → reason 'abandoned')
+  const abandoned = r.reason === 'abandoned';
   const titles = Array.isArray(gd.config?.titles) ? gd.config.titles : [];
   const best = {};
   for (const [k] of STAT_ROWS) {
@@ -143,8 +147,8 @@ export function ResultView({ res, pub = null, myId = null, backLabel, onBack, qu
         <div class="result__summary">
         <div class="result__logo"><${Sprite} k="entry/season_logo_settle" class="result__logoimg" fallback=${html`<${MicroLabel} tone="mint">STRONGHOLD PROTOCOL</${MicroLabel}>`} /></div>
         ${r.difficulty ? html`<${DifficultyTag} difficulty=${r.difficulty} size="lg" />` : null}
-        <h1 class="result__headline">${r.victory ? t('模拟完成') : t('模拟失败')}</h1>
-        <p class="result__sub">${r.victory ? t('成功卫戍 · 敌方领袖已被击败') : t('防线已被突破')}</p>
+        <h1 class="result__headline">${r.victory ? t('模拟完成') : abandoned ? t('模拟中断') : t('模拟失败')}</h1>
+        <p class="result__sub">${r.victory ? t('成功卫戍 · 敌方领袖已被击败') : abandoned ? t('所有志愿者离线，本局已放弃') : t('防线已被突破')}</p>
         <div class="result__rounds">
           <span class="result__rlabel">${t('通过回合')}</span>
           <b class="result__rnum num">${r.roundsPassed}</b>

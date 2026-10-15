@@ -54,6 +54,10 @@ export function normalizeResult(res, pub) {
     bossId: r.bossId ?? pub?.bossId ?? null,
     hiddenBossId: r.hiddenBossId ?? pub?.hiddenBossId ?? null,
     durationMs: Number.isFinite(r.durationMs) ? r.durationMs : null,
+    // how the match ended (`'victory'` / `'defeat'` / `'eliminated'` / `'abandoned'`, Match.outcome): the screen needs
+    // it to tell an abandoned volunteer-freeze from a lost defence — both arrive as victory:false (frozen.js
+    // _frozenExpire → settle.js finish)
+    reason: typeof r.reason === 'string' ? r.reason : null,
     players,
   };
 }

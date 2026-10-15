@@ -907,8 +907,16 @@ export class Lobby {
   }
 
   /**
-   * Replay record for the humans still seated when a match ends (null when the match produced no m.result,
-   * e.g. it was abandoned: those clients then see "simulation closed").
+   * Replay record for the humans still seated when a match ends: the last `m.public` and each one's own `m.result`
+   * frame, so a socket that was down at the settlement still gets the outcome on its next resync (`replayFor` from
+   * `runResync`, and `session.pendingResult` once the room is disposed).
+   *
+   * An abandoned volunteer-freeze (frozen.js `_frozenExpire`) is the case this exists for, and it *does* produce an
+   * `m.result`: `settle.js finish` builds one for every `finish`, `matchSend` records the frame even though every
+   * socket is down, and the seats are not `left` yet, so the record is built. What is not automatic is the wording —
+   * the frame carries `reason: 'abandoned'`, which the client has to render (screens/result.js).
+   *
+   * Null only when no frame was recorded at all (every seat already `left` when the match ended).
    * @param {Room} room @returns {Room['replay']}
    */
   buildReplay(room, ctx) {
