@@ -46,7 +46,10 @@
 //      arrangement of a prep REHEARSES up to m.botRehearsal distinct layout variants with the real Battle (rehearsal
 //      seed, no meta dispatch, board restored exactly) and keeps the one with the fewest leaks. The default plan is
 //      placed first; Match steps the rehearsal in wall-clock-bounded slices (botPrepBegin → job.run → botPrepEnd) so
-//      whole simulated battles never block the server's event loop. The prep routine itself is sliced the same way:
+//      whole simulated battles never block the server's event loop. With `m.botRehearsalDelegate` an AI teammate's
+//      candidates go to the current host's browser instead (a human seat under AI 托管 keeps the server's rehearsal)
+//      and the server simulates them only when nobody answers (MatchRehearsal).
+//      The prep routine itself is sliced the same way:
 //      botPrepBeginSteps / botPrepEndSteps (and planLayoutSteps, arrangeSteps, createRehearsalSteps) are step
 //      generators that yield between whole actions (never with a transient board) — the same actions in the same
 //      order as the one-shot functions (runSteps), hence the same rng draws and decisions.
@@ -80,6 +83,7 @@
 import { GEO } from '../../shared/constants.js';
 import { deriveSeed } from '../sim/rng.js';
 import { ASPD_MIN } from '../sim/constants.js';
+import { rehearsalCap, RehearsalRun } from '../sim/rehearsal.js';
 import { freeSlot, countFree, legalTiles, canPlace, positionClass, placeClass, basePositionClass, parseKey, tileKey, FIELD, pieceDir, boardTileOf, BOSS_MIRROR_COL } from './board.js';
 import { rotateOffset, normDir, mirrorDir, oppositeDir } from '../sim/dir.js';
 import { itemKey } from './gamedata.js';
@@ -1060,119 +1064,133 @@ function distinctPlans(plans) {
   return out;
 }
 
-/** Counted leaks of the bot's player in a (possibly still running) rehearsal battle. */
-function countedLeaks(battle, playerId) {
-  const r = battle.result();
-  const pp = r && r.perPlayer && r.perPlayer[playerId];
-  return pp ? (pp.leaked || []).filter((l) => l && l.counted !== false).length : 0;
+/**
+ * Run `fn` with one candidate's layout on the board (its pieces on the plan's tiles, facing the plan's directions) and
+ * restore the board exactly afterwards — every piece and every direction as it was. A throw is propagated with the
+ * board already restored.
+ */
+function withCandidateBoard(ps, byUid, plan, fn) {
+  const saved = [...ps.board.entries()];
+  const savedDirs = new Map([...byUid.values(), ...saved.map(([, p]) => p)].map((p) => [p, Object.hasOwn(p, 'dir') ? { v: p.dir } : null]));
+  try {
+    ps.board.clear();
+    for (const [uid, k] of plan) { const p = byUid.get(uid); if (p) { p.dir = planDir(plan, uid); ps.board.set(k, p); } }
+    ps.recompute();
+    return fn();
+  } finally {
+    ps.board.clear();
+    for (const [p, d] of savedDirs) { if (d) p.dir = d.v; else delete p.dir; }
+    for (const [k, p] of saved) ps.board.set(k, p);
+    ps.recompute();
+  }
+}
+
+/**
+ * One candidate's battle options: the round's enemies against the player's board as the candidate places it. Taken with
+ * the layout on the board (`players[0]`), a plain object the server builds its `Battle` from and a delegated rehearsal
+ * turns into a BattleSpec (server/sim/spec.js buildBattleSpec) — one description, both sides.
+ */
+function candidateBattle(m, ps) {
+  const wave = m.wave;
+  const spawns = withBounties(m.gd, m.round, wave, ps.bounties, ps.playerId).map((sp) => ({ ...sp, ownerPlayerId: ps.playerId }));
+  return {
+    seed: deriveSeed(m.seed, `rehearse:${m.round}:${ps.seat}`), kind: 'normal', modeId: m.modeId, round: m.round,
+    stageId: m.stageId, rect: { ...GEO.NORMAL_RECT }, timeLimit: wave.timeLimit, players: [ps.battleInput({ side: 'L', colOffset: 0 })],
+    spawns: m._sanitizeSpawns(spawns, ps.playerId), routes: wave.routes, sharedBoss: null,
+    flags: { layerGainsEnabled: false, ...m.gd.dp }, fieldId: `r:${ps.playerId}`, enemyOverrides: wave.overrides, waveId: wave.templateId,
+  };
+}
+
+/**
+ * Rehearsal job: the candidate layouts of one prep, the best of them and the server's own run over them. `inputs` are
+ * the candidates' battle options (candidateBattle); the run's `Battle`s are built from them when `run` reaches each
+ * candidate — inside the same slice budget as its stepping (server/sim/rehearsal.js RehearsalRun) —, so a job whose
+ * rehearsal was delegated to a browser costs nothing here until the server takes it over.
+ * `run(budgetMs)` steps the candidates until every one is done (false: still running); `done` is only true then, and
+ * `best` is the winner — the default plan (`plans[0]`) while no candidate beat it. A whole rehearsal is 0.2–1 s of CPU
+ * late in a 4-bot match: Match runs it in bounded slices between other callbacks.
+ */
+export function createRehearsalJob(m, ps, chosen, plans, inputs) {
+  const cap = rehearsalCap(m.wave.timeLimit);
+  let run = null;
+  const job = {
+    chosen, plans, inputs, cap, best: plans[0], done: false, pending: false,
+    run(budgetMs = Infinity) {
+      if (!run) {
+        run = new RehearsalRun(inputs.map((o) => () => m.newBattle(o)), ps.playerId, cap, {
+          onError: (e) => m.log.warn?.(`[match ${m.roomCode}] bot rehearsal failed: ${e && e.message}`),
+        });
+      }
+      const timed = Number.isFinite(budgetMs);
+      const t0 = timed ? performance.now() : 0;
+      job.done = run.run(timed ? () => performance.now() - t0 >= budgetMs : null);
+      job.best = job.plans[run.score.index] || job.best;
+      return job.done;
+    },
+  };
+  return job;
+}
+
+/**
+ * The same job with its candidates handed to the match's current host (DESIGN §14 rehearsal delegation): the browser
+ * simulates the specs and only the winning index comes back (`accept`, which leaves `done` true and the pick in `best`
+ * — the server is done with this rehearsal and simulates nothing), so `pending` is true until then — a takeover
+ * (`takeOver`, `done` still false) runs the very same candidates here instead. A synchronous `run` (the one-shot
+ * botPrep, tools, tests) takes a delegated job over at once: no browser can answer within one call.
+ */
+export function createDelegatedRehearsalJob(m, ps, chosen, plans, inputs) {
+  const job = createRehearsalJob(m, ps, chosen, plans, inputs);
+  const step = job.run;
+  job.pending = true;
+  /** The host's pick (MatchRehearsal checked the sender, the task and the index). */
+  job.accept = (index) => { if (!job.pending) return; job.pending = false; job.done = true; job.best = job.plans[index]; };
+  /** The server runs the same candidates (timeout, host gone, a failed or refused task). */
+  job.takeOver = () => { job.pending = false; };
+  job.run = (budgetMs) => { if (job.pending) job.takeOver(); return step(budgetMs); };
+  return job;
 }
 
 /**
  * Rehearsal job: a player "tries out" candidate layouts — each distinct plan (up to m.botRehearsal) is simulated once
  * against the round's enemies with the real Battle (a rehearsal seed, never the real battle's; no onBattleStart meta
- * dispatch, so it has no side effect on the match) and the plan with the fewest counted leaks (then most kills) wins.
- * Every candidate's Battle is built right away (each layout is on the board only while its input is taken; the board
- * is restored exactly before this returns), so the job can be stepped later: `job.run(budgetMs)` simulates until the
- * wall-clock budget is used (checked every 4 ticks) and returns true once every candidate is done. A candidate whose
- * counted leaks already exceed the best finished one's stops early (it can no longer win).
- * A whole rehearsal is 0.2–1 s of CPU late in a 4-bot match: Match runs it in bounded slices between other callbacks.
- * @returns {null | { chosen: any[], plans: Array<Map<number, string>>, best: Map<number, string>, done: boolean, run: (budgetMs?: number) => boolean }}
- *   null when there is nothing to compare (no wave, < 2 distinct plans, rehearsal off)
+ * dispatch, so it has no side effect on the match) and the plan with the fewest counted leaks (then most kills) wins
+ * (server/sim/rehearsal.js scores it, on both sides of a delegated rehearsal).
+ * @returns {null | ReturnType<typeof createRehearsalJob>} null when there is nothing to compare (no wave, < 2 distinct
+ *   plans, rehearsal off)
  */
 export function createRehearsal(m, ps, chosen, plans) {
   return runSteps(createRehearsalSteps(m, ps, chosen, plans));
 }
 
 /**
- * createRehearsal as a step generator: yields after each candidate's Battle is built. Each candidate puts its layout on
- * the board, takes the battle input and restores the board exactly before the next yield — a bot prep dropped between
+ * createRehearsal as a step generator: yields after each candidate's battle input is taken. Each candidate puts its
+ * layout on the board, takes the input and restores the board exactly before the next yield — a bot prep dropped between
  * two steps (the prep ended) never leaves a rehearsal layout on the board.
+ * `delegate` (the async bot-prep driver, Match.scheduleBotPrep): the candidates are offered to the current host's
+ * browser (Match.delegateRehearsal — an AI teammate's prep only, when the match has a host to ask); a synchronous
+ * caller leaves it off and simulates on the server.
  */
-export function* createRehearsalSteps(m, ps, chosen, plans) {
+export function* createRehearsalSteps(m, ps, chosen, plans, { delegate = false } = {}) {
   const wave = m.wave;
   const distinct = distinctPlans(plans);
   if (!wave || distinct.length < 2 || !(m.botRehearsal > 0)) return null;
   const cands = distinct.slice(0, m.botRehearsal);
   const byUid = new Map(chosen.map((p) => [p.uid, p]));
-  const battles = [];
+  const inputs = [];
   for (const plan of cands) {
-    const saved = [...ps.board.entries()];
-    // the candidate's directions are set on the pieces while its input is taken; restored exactly afterwards
-    const savedDirs = new Map([...byUid.values(), ...saved.map(([, p]) => p)].map((p) => [p, Object.hasOwn(p, 'dir') ? { v: p.dir } : null]));
+    let input = null;
     let failed = false;
-    try {
-      ps.board.clear();
-      for (const [uid, k] of plan) { const p = byUid.get(uid); if (p) { p.dir = planDir(plan, uid); ps.board.set(k, p); } }
-      ps.recompute();
-      const spawns = withBounties(m.gd, m.round, wave, ps.bounties, ps.playerId).map((sp) => ({ ...sp, ownerPlayerId: ps.playerId }));
-      battles.push(m.newBattle({
-        seed: deriveSeed(m.seed, `rehearse:${m.round}:${ps.seat}`), kind: 'normal', modeId: m.modeId, round: m.round,
-        stageId: m.stageId, rect: { ...GEO.NORMAL_RECT }, timeLimit: wave.timeLimit, players: [ps.battleInput({ side: 'L', colOffset: 0 })],
-        spawns: m._sanitizeSpawns(spawns, ps.playerId), routes: wave.routes, sharedBoss: null,
-        flags: { layerGainsEnabled: false, ...m.gd.dp }, fieldId: `r:${ps.playerId}`, enemyOverrides: wave.overrides, waveId: wave.templateId,
-      }));
-    } catch (e) {
-      failed = true;
-      m.log.warn?.(`[match ${m.roomCode}] bot rehearsal failed: ${e && e.message}`);
-    } finally {
-      ps.board.clear();
-      for (const [p, d] of savedDirs) { if (d) p.dir = d.v; else delete p.dir; }
-      for (const [k, p] of saved) ps.board.set(k, p);
-      ps.recompute();
-    }
+    try { input = withCandidateBoard(ps, byUid, plan, () => candidateBattle(m, ps)); }
+    catch (e) { failed = true; m.log.warn?.(`[match ${m.roomCode}] bot rehearsal failed: ${e && e.message}`); }
     if (failed) break;
+    inputs.push(input);
     yield;
   }
-  const cap = Math.ceil(((wave.timeLimit || 60) + 5) * 30);
-  let i = 0;
-  let t = 0;
-  let bestScore = -Infinity;
-  let bestLeaks = Infinity;
-  const job = {
-    chosen,
-    plans: cands,
-    best: cands[0],
-    done: false,
-    run(budgetMs = Infinity) {
-      const timed = Number.isFinite(budgetMs);
-      const t0 = timed ? performance.now() : 0;
-      let n = 0;
-      while (i < battles.length) {
-        // a candidate that ended mid-slice (finished, cap, or beaten at a 64-tick check that skipped the budget test):
-        // check the budget before stepping the next one, so a slice never exceeds 4 ticks past its budget
-        if (timed && n > 0 && performance.now() - t0 >= budgetMs) return false;
-        const battle = battles[i];
-        try {
-          let beaten = false;
-          while (t < cap && !battle.finished) {
-            battle.step();
-            t++;
-            n++;
-            if ((t & 63) === 0 && bestLeaks < Infinity && countedLeaks(battle, ps.playerId) > bestLeaks) { beaten = true; break; }
-            if (timed && (n & 3) === 0 && performance.now() - t0 >= budgetMs) return false;
-          }
-          if (!beaten) {
-            if (!battle.finished) battle.forceEnd('timeout');
-            const r = battle.result();
-            const pp = r && !r.synthetic && r.perPlayer && r.perPlayer[ps.playerId];
-            if (pp) {
-              const leaks = (pp.leaked || []).filter((l) => l && l.counted !== false).length;
-              const score = -leaks * 1000 + (pp.killed || 0) - i * 0.01;
-              if (score > bestScore) { bestScore = score; bestLeaks = leaks; job.best = cands[i]; }
-            }
-          }
-        } catch (e) {
-          m.log.warn?.(`[match ${m.roomCode}] bot rehearsal failed: ${e && e.message}`);
-        }
-        battles[i] = null;
-        i++;
-        t = 0;
-      }
-      job.done = true;
-      return true;
-    },
-  };
-  return job;
+  if (delegate) {
+    const job = m.delegateRehearsal({ ps, chosen, plans: cands, inputs });
+    if (job) return job;
+  }
+  return createRehearsalJob(m, ps, chosen, cands, inputs);
 }
 
 /**
@@ -1352,9 +1370,10 @@ export function botPrepBegin(m, ps) {
  * botPrepBegin as a step generator (the same actions in the same order, hence the same rng draws and decisions): it
  * yields between whole prep actions — never while the board holds a transient layout — so Match.scheduleBotPrep runs
  * it in wall-clock-bounded slices like the rehearsal (50–120 ms of planning in one callback late in a 4-bot match
- * otherwise). Returns the rehearsal job (or null).
+ * otherwise). `delegate` (the async driver): offer the final rehearsal to the current host's browser.
+ * Returns the rehearsal job (or null).
  */
-export function* botPrepBeginSteps(m, ps) {
+export function* botPrepBeginSteps(m, ps, { delegate = false } = {}) {
   if (!ps.alive || ps.ready) return null;
   m.autoPickPersonalChoice(ps, 'bot');
   // 1. reward offers (free)
@@ -1377,7 +1396,7 @@ export function* botPrepBeginSteps(m, ps) {
   yield* arrangeSteps(m, ps);
   equipItems(m, ps);
   yield;
-  return yield* arrangeSteps(m, ps, { final: true, defer: true });
+  return yield* arrangeSteps(m, ps, { final: true, defer: true, delegate });
 }
 
 /** Prep routine, end: the rehearsed layout (when it beat the default plan), temp, a free hand slot, Ready. */
@@ -1569,15 +1588,16 @@ function* buyLoopSteps(m, ps, { fillOnly = false, maxRefreshes = 0 } = {}) {
 /**
  * Choose the deployed set and put it on the best tiles for this round's enemies (planLayout). `final`: the last
  * arrangement of the prep — candidate plans are rehearsed (see createRehearsal) when the match allows it; with `defer`
- * the default plan is placed now and the rehearsal job is returned (the caller runs it and applies `job.best`).
- * @returns {null | ReturnType<typeof createRehearsal>}
+ * the default plan is placed now and the rehearsal job is returned (the caller runs it and applies `job.best`), and with
+ * `delegate` that job may be the current host's browser instead (Match.delegateRehearsal).
+ * @returns {null | ReturnType<typeof createRehearsalSteps>}
  */
 export function arrange(m, ps, opts = {}) {
   return runSteps(arrangeSteps(m, ps, opts));
 }
 
 /** arrange as a step generator (yields inside the layout planning, see planLayoutSteps). */
-export function* arrangeSteps(m, ps, { final = false, defer = false } = {}) {
+export function* arrangeSteps(m, ps, { final = false, defer = false, delegate = false } = {}) {
   const ctx = context(m, ps);
   const chosen = chooseLineup(m, ps, ctx).set;
   const chosenSet = new Set(chosen.map((p) => p.uid));
@@ -1596,7 +1616,7 @@ export function* arrangeSteps(m, ps, { final = false, defer = false } = {}) {
     plans.push(yield* planLayoutSteps(m, ps, chosen));
   }
   if (defer && plans.length > 1) {
-    const job = yield* createRehearsalSteps(m, ps, chosen, plans);
+    const job = yield* createRehearsalSteps(m, ps, chosen, plans, { delegate });
     yield* applyPlanSteps(m, ps, chosen, plans[0]);
     return job;
   }
