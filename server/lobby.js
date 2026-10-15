@@ -382,8 +382,13 @@ export class Lobby {
   onDisconnect(session) {
     this.clearResync(session.playerId); // the next resume resyncs immediately
     const room = this.roomOf(session);
-    // a solo run may be resumed within singleReconnectTime (24 h); everything else keeps the registry's window
-    session.resumeWindowMs = room && room.match && room.mode === 'solo' ? this.soloResumeWindowMs() : null;
+    // A solo run may be resumed within singleReconnectTime (24 h). A co-op match is held for its volunteers by the
+    // volunteer-freeze (frozen.js), so its seats must outlive that hold — the match answers with its own window
+    // (FROZEN_MS + margin); a match without one (the platform StubMatch) keeps the registry's default, never shorter.
+    const window_ms = room && room.match
+      ? (room.mode === 'solo' ? this.soloResumeWindowMs() : this.callMatch(room, 'frozenReconnectMs'))
+      : null;
+    session.resumeWindowMs = typeof window_ms === 'number' && window_ms > 0 ? window_ms : null;
     if (!room) return;
     const player = room.seatOf(session.playerId);
     const seat = player || room.spectatorOf(session.playerId);

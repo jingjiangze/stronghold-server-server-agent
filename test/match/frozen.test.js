@@ -225,7 +225,10 @@ test('a volunteer returning inside the window thaws; the give-up timer is cancel
   assert.deepEqual(m.setFrozen(false), { ok: true });
   assert.equal(m.frozenTimer, null, 'the timer was cancelled on thaw');
   h.sched.advance(FROZEN_MS * 2);
-  assert.equal(h.ended, null, 'the running match is not abandoned by the thawed freeze');
+  // The match may well finish on its own in that much time (an unbounded battle is cap-ended and the round
+  // settles): what this asserts is that the *freeze* left no stale give-up behind — an expired hold abandons, and
+  // nothing else does.
+  assert.notEqual(h.ended && h.ended.reason, 'abandoned', 'the thawed freeze left no stale give-up timer');
   assert.equal(m.frozen, false);
   m.dispose();
 });
@@ -407,4 +410,15 @@ test('a 联防 (UNITE) battle is held too: the freeze gate covers every phase _m
   h.runToEnd();
   assert.deepEqual(h.logs.error, [], 'no error logged');
   m.dispose();
+});
+
+// The hold is only as good as the seat's lifetime: the registry expires a disconnected session at its own window
+// (net.js reconnectWindowMs, 10 min) and `onExpire → onLeave` abandons the match when the last volunteer is marked
+// `left`. So the co-op window the lobby hands the session must outlive the freeze (lobby.js onDisconnect asks the
+// match; net.js `windowOf` can only extend the registry's default).
+test('a held co-op match asks for a seat window longer than its own give-up deadline', () => {
+  const h = coopInCombat();
+  assert.equal(FROZEN_MS, 30 * 60_000, 'the volunteer-freeze holds for 30 minutes');
+  assert.ok(h.m.frozenReconnectMs() > FROZEN_MS, 'and the seat outlives the hold, so the freeze — not the sweep — decides the give-up');
+  h.m.dispose();
 });

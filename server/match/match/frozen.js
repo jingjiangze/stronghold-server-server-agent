@@ -19,8 +19,15 @@
 import { PHASE, ERR } from '../../../shared/constants.js';
 import { OK, fail } from './common.js';
 
-/** Wall-clock ms a volunteer-less co-op match stays held before it is abandoned. */
-export const FROZEN_MS = 10 * 60_000;
+/**
+ * Wall-clock ms a volunteer-less co-op match stays held before it is abandoned.
+ *
+ * 30 minutes: long enough for a real disconnect (a dropped connection, a phone call, a browser crash and restart) to
+ * come back, short enough that a room nobody returns to does not hold a Match instance for a day. The registry's own
+ * reconnect window (net.js `reconnectWindowMs`, 10 min) must NOT expire the seats before this deadline — that is what
+ * `frozenReconnectMs` below is for (lobby.js asks the match for it on every disconnect).
+ */
+export const FROZEN_MS = 30 * 60_000;
 
 /**
  * The phases a volunteer-freeze may hold: every phase of a running match.
@@ -35,6 +42,21 @@ function isHoldablePhase(phase) {
 }
 
 export class MatchFrozen {
+  /**
+   * How long a seat of this match must stay resumable after its socket drops: the freeze's own give-up window plus a
+   * margin, so the registry's sweep can never expire a seat while the freeze is still waiting for it.
+   *
+   * The lobby asks this on every disconnect (server/lobby.js `onDisconnect`) and hands the answer to the session
+   * (`Session#resumeWindowMs`, net.js `windowOf` — an override can only *extend* the registry's default). Without it
+   * the 10-minute registry window would expire the seats of a held match at 10 minutes, `onExpire → onLeave` would
+   * mark the last volunteer `left`, and `platform.js onLeave` would abandon a match whose freeze still had 20 minutes
+   * to run — the hold would silently collapse back to the registry's window.
+   * @returns {number} ms
+   */
+  frozenReconnectMs() {
+    return FROZEN_MS + 60_000;
+  }
+
   /**
    * Freeze or thaw a volunteer-less co-op match. Called by the room (server/lobby.js) when the last connected
    * volunteer leaves or comes back, never by a client: `{ on: true }` holds the running match in whatever phase it

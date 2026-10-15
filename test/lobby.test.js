@@ -1542,7 +1542,7 @@ describe('solo resume window', () => {
     assert.notEqual(w3.playerId, a.id);
   });
 
-  test('co-op sessions keep the plain reconnect window; a solo player back in the lobby too', async () => {
+  test('a co-op seat in a running match outlives the registry window; a room without a match keeps it', async () => {
     const a = await connect();
     const w = await a.hello('Coop');
     a.id = w.playerId;
@@ -1551,13 +1551,20 @@ describe('solo resume window', () => {
     await expectOk(a, { t: 'room.start' });
     await a.waitFor('m.public', (p) => p.phase === PHASE.INFO_CHECK);
     const match = srv.lobby.getRoom(st.code).match;
+    // The lobby asks the *match* how long its seats must stay resumable. A co-op match is held for its volunteers by
+    // the volunteer-freeze, whose give-up deadline is far longer than the registry's window, so the seat has to
+    // outlive it — otherwise the sweep would expire the last seat and `onExpire → onLeave → platform.js` would
+    // abandon a match whose freeze still had time to run.
+    const asked = match.frozenReconnectMs();
+    assert.ok(asked > WINDOW, `the match asks for more than the registry window (got ${asked})`);
     await a.terminate();
+    assert.equal(srv.registry.byId(a.id).resumeWindowMs, asked, 'the session carries the match\'s window');
     await delay(WINDOW + 600);
-    assert.equal(match.players.get(a.id).left, true, 'co-op: the window expired → onLeave');
+    assert.equal(match.players.get(a.id).left, false, 'co-op in a running match: the registry window did not expire the seat');
     const b = await connect();
-    assert.equal((await b.hello('Coop', w.token)).resumed, false);
+    assert.equal((await b.hello('Coop', w.token)).resumed, true, 'and the volunteer is still resumable');
 
-    // solo room without a running match: no extension (the lobby grace frees the seat anyway)
+    // a room without a running match (the lobby): no extension (the lobby grace frees the seat anyway)
     const s = await connect();
     const ws = await s.hello('Idle');
     s.id = ws.playerId;
