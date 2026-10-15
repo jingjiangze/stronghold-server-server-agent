@@ -22,12 +22,14 @@ import { OK, fail } from './common.js';
 /**
  * Wall-clock ms a volunteer-less co-op match stays held before it is abandoned.
  *
- * 30 minutes: long enough for a real disconnect (a dropped connection, a phone call, a browser crash and restart) to
- * come back, short enough that a room nobody returns to does not hold a Match instance for a day. The registry's own
- * reconnect window (net.js `reconnectWindowMs`, 10 min) must NOT expire the seats before this deadline — that is what
- * `frozenReconnectMs` below is for (lobby.js asks the match for it on every disconnect).
+ * 10 minutes: long enough for a dropped connection (a reload, a flaky network, a phone call) to come back, and the
+ * same order as the registry's own reconnect window — a room nobody returns to must not hold a Match instance for
+ * long. The registry's window must NOT expire the seats before this deadline, which is what `frozenReconnectMs`
+ * below is for (lobby.js asks the match for it on every disconnect): both clocks start at the same instant, the
+ * *last* disconnect, so an equal window would expire the seats exactly as the freeze gives up — and `onExpire →
+ * onLeave` would take the decision away from this timer.
  */
-export const FROZEN_MS = 30 * 60_000;
+export const FROZEN_MS = 10 * 60_000;
 
 /**
  * The phases a volunteer-freeze may hold: every phase of a running match.

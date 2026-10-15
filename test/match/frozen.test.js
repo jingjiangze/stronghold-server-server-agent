@@ -418,7 +418,7 @@ test('a 联防 (UNITE) battle is held too: the freeze gate covers every phase _m
 // match; net.js `windowOf` can only extend the registry's default).
 test('a held co-op match asks for a seat window longer than its own give-up deadline', () => {
   const h = coopInCombat();
-  assert.equal(FROZEN_MS, 30 * 60_000, 'the volunteer-freeze holds for 30 minutes');
+  assert.equal(FROZEN_MS, 10 * 60_000, 'the volunteer-freeze holds for 10 minutes');
   assert.ok(h.m.frozenReconnectMs() > FROZEN_MS, 'and the seat outlives the hold, so the freeze — not the sweep — decides the give-up');
   h.m.dispose();
 });
