@@ -1558,6 +1558,9 @@ describe('solo resume window', () => {
     const asked = match.frozenReconnectMs();
     assert.ok(asked > WINDOW, `the match asks for more than the registry window (got ${asked})`);
     await a.terminate();
+    // the socket close is processed asynchronously on the server: wait for the seat to be handed its window before
+    // reading it (asserting straight away was a race — it failed under CI load while passing on a fast local run)
+    for (let i = 0; i < 200 && srv.registry.byId(a.id)?.resumeWindowMs == null; i++) await delay(10);
     assert.equal(srv.registry.byId(a.id).resumeWindowMs, asked, 'the session carries the match\'s window');
     await delay(WINDOW + 600);
     assert.equal(match.players.get(a.id).left, false, 'co-op in a running match: the registry window did not expire the seat');
