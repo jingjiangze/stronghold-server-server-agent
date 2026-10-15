@@ -88,7 +88,69 @@ export class MatchPause {
     }
   }
 
-  /** End a solo pause: every clock and deadline moves on by the paused time (no-op when not paused). */
+  /**
+   * Run a match-advancing step now, or queue it for the thaw while a volunteer-freeze holds the match.
+   *
+   * Holding the clocks is not enough for the steps that advance through `later(0)` chains — a PREP that found
+   * everyone ready (`prep.js maybeEndPrep`), a strategy draft whose last pick landed (`phases.js finishBandDraft`),
+   * a 机变 draft with no card left (`spDraft.js finishSpDraft`), an INFO_CHECK everyone confirmed
+   * (`phases.js maybeEndInfo`) and a 联防 settle after its battle ended (`unitePhase.js`). Their timer fires during
+   * the hold, so the *step itself* has to wait. The queue runs in order on the thaw, and each queued step re-checks
+   * its own phase, so a step that became moot by then is a no-op.
+   *
+   * Keyed on `frozen` (not `paused`): the solo pause keeps its own semantics, where the untimed phases cannot run
+   * away in the first place.
+   */
+  _whenThawed(fn) {
+    if (!this.frozen) { fn(); return; }
+    this._frozenQueue.push(fn);
+  }
+
+  /**
+   * Hold the phase / turn countdowns across a pause or a volunteer-freeze. These are not per-field timers: the phase
+   * deadline (`infra.js setDeadline`) and the strategy draft's turn (`phases.js startDraftTurn`) carry their callback
+   * and fire instant on the match, so the thaw re-arms them with the time they had left rather than the whole
+   * interval.
+   */
+  _holdPhaseClock() {
+    if (this._phaseTimer) { this.cancel(this._phaseTimer); this._phaseTimer = null; this.rearmPhase = true; }
+    if (this._turnTimer) { this.cancel(this._turnTimer); this._turnTimer = null; this.rearmTurn = true; }
+  }
+
+  /** Re-arm the countdowns `_holdPhaseClock` cancelled, each with the time it had left when the hold began. */
+  _releasePhaseClock() {
+    const now = this.sched.now();
+    if (this.rearmPhase && this._phaseFn) {
+      const fn = this._phaseFn;
+      this._phaseTimer = this.later(Math.max(0, this._phaseAt - now), () => {
+        this._phaseTimer = null;
+        this._phaseFn = null;
+        this._phaseAt = 0;
+        fn();
+      });
+    }
+    if (this.rearmTurn && this._turnFn) {
+      const fn = this._turnFn;
+      this._turnTimer = this.later(Math.max(0, this._turnAt - now), () => {
+        this._turnTimer = null;
+        this._turnFn = null;
+        this._turnAt = 0;
+        fn();
+      });
+    }
+    this.rearmPhase = false;
+    this.rearmTurn = false;
+  }
+
+  /** Run the steps the hold queued (`_whenThawed`), so the match picks up exactly where the freeze caught it. */
+  _releaseFrozenQueue() {
+    if (!this._frozenQueue.length) return;
+    const queued = this._frozenQueue;
+    this._frozenQueue = [];
+    for (const fn of queued) this.later(0, fn);
+  }
+
+  /** End a solo pause or a volunteer-freeze: every clock and deadline moves on by the held time (no-op when running). */
   _resume() {
     if (!this.paused) return;
     const d = Math.max(0, this.sched.now() - this._pausedAt);
@@ -98,6 +160,10 @@ export class MatchPause {
     if (this.deadline) this.deadline += d;
     if (this.overtimeAt) this.overtimeAt += d;
     if (this._bossStartAt != null) this._bossStartAt += d;
+    if (this._phaseAt) this._phaseAt += d;
+    if (this._turnAt) this._turnAt += d;
+    if (this.draft && this.draft.turnDeadline) this.draft.turnDeadline += d;
+    if (this.sp && this.sp.turnDeadline) this.sp.turnDeadline += d;
     for (const f of this.fields) {
       if (!f.cc || f.done) continue;
       f.startAt += d;
@@ -107,7 +173,9 @@ export class MatchPause {
       f.rearmDeadline = false;
       f.rearmRelease = false;
     }
+    this._releasePhaseClock(); // the phase / turn countdowns continue with the time they had left
     this._releaseRearms(); // the held slices / verifications / result graces continue where the freeze caught them
+    this._releaseFrozenQueue(); // the steps that came due under the hold run now
     if (this._bossClockOn && !this._bossClock && (this.phase === PHASE.FINAL_ASSAULT || this.phase === PHASE.HIDDEN_CORE)) {
       this._bossClock = this.later(BOSS_CLOCK_MS, () => this._bossClockTick());
     }

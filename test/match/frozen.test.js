@@ -44,17 +44,77 @@ test('gate: g.pause still refuses a co-op battle and the hold is the match\'s ow
   h.m.dispose();
 });
 
-test('no battle running: setFrozen refuses with WRONG_PHASE (idempotent on both sides)', () => {
+test('a held PREP does not advance: the phase countdown is held and re-armed with the time it had left', () => {
   const h = makeMatch({ mode: 'coop', difficulty: 'FUNNY', humans: 2, bots: 1, seed: 7, fake: true }).start();
   h.runToPhase(PHASE.PREP, 1);
-  // a refusal is the platform's { error, detail } shape (common.js fail): `ok` is absent, not false
-  const r = h.m.setFrozen(true);
-  assert.equal(r.ok, undefined);
+  const m = h.m;
+  const deadline = m.deadline;
+  assert.ok(m._phaseTimer, 'the prep countdown is armed');
+  assert.ok(deadline > m.sched.now(), 'and published as m.public.deadline');
+
+  assert.deepEqual(m.setFrozen(true), { ok: true });
+  assert.equal(m.frozen, true, 'a non-battle phase is holdable now (the AI seats would otherwise finish it alone)');
+  assert.equal(m.paused, true);
+  assert.equal(m.publicView().frozen, true);
+  assert.equal(m._phaseTimer, null, 'the prep countdown is cancelled by the hold');
+  assert.equal(typeof m._phaseFn, 'function', 'and keeps its callback for the thaw');
+
+  // two virtual minutes of hold: the deadline would have run out long ago, and nothing may move
+  m.sched.advance(120_000);
+  assert.equal(m.phase, PHASE.PREP, 'a held PREP does not advance');
+  assert.equal(m._clockNow(), m.frozenAt, 'the clock reads the hold instant');
+  assert.equal(m.deadline, deadline, 'and the published deadline is shifted, never run out');
+
+  assert.deepEqual(m.setFrozen(false), { ok: true });
+  assert.ok(m._phaseTimer, 'the countdown is re-armed');
+  assert.ok(m.deadline > m.sched.now(), 'with the time it had left (not the whole interval)');
+  assert.deepEqual(m.setFrozen(false), { ok: true }, 'the thaw is idempotent');
+  m.dispose();
+});
+
+test('every volunteer gone during PREP: the match holds instead of preparing for nobody', () => {
+  // The reported hole (2026-10-15): `setFrozen` used to refuse outside a battle, so the match advanced through PREP
+  // into COMBAT and played a whole battle with zero connected volunteers (settled `reason: 'defeat'`). A held PREP
+  // must neither run out nor end because the AI seats finished their own prep.
+  const h = makeMatch({
+    mode: 'coop', difficulty: 'FUNNY', humans: 2, bots: 1, seed: 7, fake: true, instant: false,
+  }).start();
+  h.autoHumans();
+  h.drive(() => h.m.phase === PHASE.PREP && h.m.round === 1, { maxSteps: 3e6 });
+  const m = h.m;
+  assert.deepEqual(m.setFrozen(true), { ok: true });
+
+  // the AI seats keep preparing under the hold (their work is bounded and theirs), and once they are ready
+  // `maybeEndPrep` comes due — the step must be queued, not run
+  m.sched.advance(60_000);
+  assert.equal(m.phase, PHASE.PREP, 'PREP did not end under the hold');
+  assert.ok(m._frozenQueue.length > 0, 'the end-prep step the hold caught is queued for the thaw');
+  assert.equal(m._clockNow(), m.frozenAt);
+
+  // the thaw runs it: PREP ends, and the battle starts with a volunteer back
+  assert.deepEqual(m.setFrozen(false), { ok: true });
+  assert.equal(m._frozenQueue.length, 0, 'the queue was drained');
+  h.drive(() => m.phase === PHASE.COMBAT, { maxSteps: 3e6 });
+  assert.equal(m.phase, PHASE.COMBAT, 'the match resumes into the battle it was holding');
+  h.runToEnd();
+  assert.deepEqual(h.logs.error, [], 'no error logged');
+  m.dispose();
+});
+
+test('a lobby / result phase has nothing to hold; a solo match keeps its own pause', () => {
+  const h = coopInCombat();
+  const m = h.m;
+  // RESULT is the only other non-running phase (LOBBY has no match yet, so the room never asks for a hold)
+  const phase = m.phase;
+  m.phase = PHASE.RESULT;
+  const r = m.setFrozen(true);
+  assert.equal(r.ok, undefined, 'a refusal is common.js fail()\'s { error, detail } shape');
   assert.equal(r.error, ERR.WRONG_PHASE);
-  assert.equal(h.m.frozen, false, 'nothing was frozen');
-  assert.equal(h.m.publicView().paused, false);
-  assert.deepEqual(h.m.setFrozen(false), { ok: true });
-  h.m.dispose();
+  assert.equal(m.frozen, false, 'nothing was frozen');
+  assert.equal(m.publicView().paused, false);
+  m.phase = phase;
+  assert.deepEqual(m.setFrozen(false), { ok: true });
+  m.dispose();
 });
 
 test('a solo match is left to its own pause: setFrozen refuses it', () => {

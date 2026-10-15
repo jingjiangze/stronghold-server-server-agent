@@ -65,8 +65,14 @@ export class MatchSetupVote {
     if (this.phase === PHASE.INFO_CHECK && !this.disposed && !this.ended) {
       if (vote.remainingMs > 0) {
         this.deadline = this.sched.now() + vote.remainingMs;
+        // same contract as infra.setDeadline: the callback and its instant stay on the match so a volunteer-freeze
+        // can hold this countdown and re-arm it on the thaw (pause.js _holdPhaseClock / _releasePhaseClock)
+        this._phaseFn = () => this.enterBandDraft();
+        this._phaseAt = this.deadline;
         this._phaseTimer = this.later(vote.remainingMs, () => {
           this._phaseTimer = null;
+          this._phaseFn = null;
+          this._phaseAt = 0;
           this.enterBandDraft();
         });
       }

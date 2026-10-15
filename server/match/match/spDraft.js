@@ -50,7 +50,7 @@ export class MatchSpDraft {
       s.idx++;
     }
     const available = s.cards.filter(c => this.spCardAvailable(c)).map(c => c.idx);
-    if (s.idx >= s.order.length || !available.length) { this.setDeadline(0); this.later(0, () => this.finishSpDraft()); return; }
+    if (s.idx >= s.order.length || !available.length) { this.setDeadline(0); this.later(0, () => this._whenThawed(() => this.finishSpDraft())); return; }
     const token = ++this._turnToken;
     if (!s.untimed) {
       const first = s.idx === 0;

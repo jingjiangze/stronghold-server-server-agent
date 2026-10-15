@@ -106,7 +106,11 @@ export class MatchPrep {
     // the prep deadline stays armed until the phase really ends: a player may un-ready before this runs
     this.later(0, () => {
       this._prepEndQueued = false;
-      if (this.phase === PHASE.PREP && this.round === round && allReady()) this.endPrep();
+      // a volunteer-freeze queues the end instead of running it: a held PREP must not end under the hold (the AI
+      // seats finish their prep during it, so "everyone ready" is exactly what a freeze would otherwise trip over)
+      this._whenThawed(() => {
+        if (this.phase === PHASE.PREP && this.round === round && allReady()) this.endPrep();
+      });
     });
   }
 

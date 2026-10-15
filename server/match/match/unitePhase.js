@@ -35,7 +35,7 @@ export class MatchUnite {
         this.fields[0].live = false;
         this.deadline = 0;
         this.markPublic();
-        this.later(this.scaled(DELAYS.COMBAT_END), () => this.settle(plan, res));
+        this.later(this.scaled(DELAYS.COMBAT_END), () => this._whenThawed(() => this.settle(plan, res)));
       },
     });
     this.runner.start();
@@ -96,7 +96,7 @@ export class MatchUnite {
     this.deadline = 0;
     this.markPublic();
     const plan = this.unitePlan;
-    this.later(this.scaled(DELAYS.COMBAT_END), () => this.settle(plan, res));
+    this.later(this.scaled(DELAYS.COMBAT_END), () => this._whenThawed(() => this.settle(plan, res)));
   }
 
   /**

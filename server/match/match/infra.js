@@ -45,14 +45,22 @@ export class MatchInfra {
   /**
    * Set the phase deadline (seconds; null/0 ⇒ untimed) and its timeout callback. `silent`: the timer runs but no
    * deadline is published (m.public.deadline 0 ⇒ no countdown) — the fixed presentation steps of a solo match.
+   *
+   * The callback and its fire instant are kept on the match (`_phaseFn` / `_phaseAt`): a volunteer-freeze holds this
+   * countdown like any other (pause.js `_holdPhaseClock`), and re-arming it needs both. `_phaseAt` is absolute even
+   * for a `silent` deadline, whose published `deadline` is 0 by design.
    */
   setDeadline(seconds, fn, { silent = false } = {}) {
     this.cancel(this._phaseTimer);
     this._phaseTimer = null;
+    this._phaseFn = null;
+    this._phaseAt = 0;
     if (!(seconds > 0) || typeof fn !== 'function') { this.deadline = 0; return; }
     const ms = this.scaled(seconds * 1000);
     this.deadline = silent ? 0 : this.sched.now() + ms;
-    this._phaseTimer = this.later(ms, () => { this._phaseTimer = null; fn(); });
+    this._phaseFn = fn;
+    this._phaseAt = this.sched.now() + ms;
+    this._phaseTimer = this.later(ms, () => { this._phaseTimer = null; this._phaseFn = null; this._phaseAt = 0; fn(); });
   }
 
   /**

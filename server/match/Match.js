@@ -360,12 +360,23 @@ export class Match {
     /** @type {Set<any>} */
     this._timers = new Set();
     this._phaseTimer = null;
+    // the phase deadline's callback and fire instant (infra.js setDeadline): a volunteer-freeze holds the countdown
+    // and re-arms it on the thaw, so it needs both (pause.js _holdPhaseClock / _releasePhaseClock)
+    this._phaseFn = null;
+    this._phaseAt = 0;
     this._infoAdvanceTimer = null;
     this.setupRevision = 0;
     this.setupVote = null;
     this._setupVoteSeq = 0;
     this._lastSetupVoteAt = -Infinity;
     this._turnTimer = null;
+    // the strategy draft's turn callback and fire instant (phases.js startDraftTurn): same contract as _phaseFn
+    this._turnFn = null;
+    this._turnAt = 0;
+    this.rearmPhase = false;
+    this.rearmTurn = false;
+    /** @type {Array<() => void>} the steps a volunteer-freeze queued instead of running (pause.js _whenThawed) */
+    this._frozenQueue = [];
     this._pubDirty = false;
     this._pubTimer = null;
     this._lastPubAt = -Infinity;

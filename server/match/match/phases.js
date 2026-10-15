@@ -29,7 +29,11 @@ export class MatchPhases {
       this.setDeadline(0);
       this._infoAdvanceTimer = this.later(0, () => {
         this._infoAdvanceTimer = null;
-        if (this.phase === PHASE.INFO_CHECK && !this.setupVote) this.enterBandDraft();
+        // a volunteer-freeze queues the step instead of running it (`_whenThawed`): the hold stops the match, not
+        // only its clocks
+        this._whenThawed(() => {
+          if (this.phase === PHASE.INFO_CHECK && !this.setupVote) this.enterBandDraft();
+        });
       });
     }
   }
@@ -92,7 +96,7 @@ export class MatchPhases {
     if (d.idx >= d.order.length) {
       d.turnDeadline = 0;
       this.deadline = 0;
-      this.later(0, () => this.finishBandDraft(false));
+      this.later(0, () => this._whenThawed(() => this.finishBandDraft(false)));
       return;
     }
     const token = ++this._turnToken;
@@ -101,10 +105,19 @@ export class MatchPhases {
       d.turnDeadline = this.sched.now() + ms;
       // the step's countdown IS the turn's (one number everywhere)
       this.deadline = d.turnDeadline;
-      this._turnTimer = this.later(ms, () => {
+      // the callback and its instant stay on the match: a volunteer-freeze holds the turn and re-arms it (pause.js)
+      const onTimeout = () => {
         if (this.phase !== PHASE.BAND_DRAFT || token !== this._turnToken) return;
         const pid = this.draftTurn();
         if (pid) this._applyBand(this.players.get(pid), this.timeoutBand(pid));
+      };
+      this._turnFn = onTimeout;
+      this._turnAt = d.turnDeadline;
+      this._turnTimer = this.later(ms, () => {
+        this._turnTimer = null;
+        this._turnFn = null;
+        this._turnAt = 0;
+        onTimeout();
       });
     } else {
       d.turnDeadline = 0;
