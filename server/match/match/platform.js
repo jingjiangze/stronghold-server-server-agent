@@ -9,6 +9,7 @@ import { PHASE, ERR } from '../../../shared/constants.js';
 import { syntheticResult } from '../fields.js';
 import { FLOW_TICKER_PRIORITY, OK, fail } from './common.js';
 import { msg } from '../../../shared/i18n.js';
+import { dropStagedLineups } from '../../lineupLibrary.js';
 
 const GAME_TYPES = new Set(Object.keys(C2S).filter((t) => Object.hasOwn(C2S, t) && (t.startsWith('g.') || t.startsWith('b.'))));
 
@@ -208,6 +209,7 @@ export class MatchPlatform {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    dropStagedLineups(); // this match will never settle: its preps' lineups must not reach the library
     if (this.runner) { try { this.runner.stop(); } catch { /* ignore */ } }
     this._stopClientCombat();
     this._cancelRehearsal();

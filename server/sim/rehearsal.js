@@ -2,8 +2,8 @@
 // (DESIGN §14 rehearsal delegation). The candidates of one rehearsal are simulated once each and the winner is the one
 // with the fewest counted leaks, then the most kills, then the earliest candidate (server/match/bot.js). Both sides
 // step the same BattleSpecs in the same order and use THIS module, so a rehearsal delegated to a browser picks exactly
-// the candidate the server would pick — including the early stop (a candidate whose counted leaks already exceed the
-// best finished one's can no longer win) and the tick cap (the field's time limit + 5 s of slack).
+// the candidate the server would pick — including the early stop (a candidate whose ceiling no longer beats the best
+// finished one's score cannot win) and the tick cap (the field's time limit + 5 s of slack).
 //
 // Pure ESM (served at /sim/rehearsal.js): no Node API, no clock, no randomness — the caller owns the stepping, the
 // candidates' construction and its wall-clock slices (`RehearsalRun.run(outOfBudget)`).
@@ -22,6 +22,18 @@ export function rehearsalLeaks(battle, playerId) {
   return pp ? (pp.leaked || []).filter((l) => l && l.counted !== false).length : 0;
 }
 
+/** Counted leaks, kills and the stage's own enemy count of `playerId` in a battle (running or finished). */
+function rehearsalCounts(battle, playerId) {
+  const r = battle && typeof battle.result === 'function' ? battle.result() : null;
+  const pp = r && r.perPlayer && r.perPlayer[playerId];
+  if (!pp) return { leaks: 0, kills: 0, total: 0 };
+  return {
+    leaks: (pp.leaked || []).filter((l) => l && l.counted !== false).length,
+    kills: pp.killed || 0,
+    total: pp.total || 0,
+  };
+}
+
 /** The best candidate of a rehearsal so far: `index` into the candidate order, `leaks` / `score` of that candidate. */
 export class RehearsalScore {
   /** @param {string} playerId whose leaks and kills the candidates are compared by */
@@ -29,15 +41,26 @@ export class RehearsalScore {
     this.playerId = playerId;
     this.index = 0;
     this.leaks = Infinity;
+    this.kills = 0;
     this.score = -Infinity;
   }
 
   /**
-   * Whether a running candidate can still win: its counted leaks do not exceed the best finished one's. The early stop
-   * the server's rehearsal always had (a candidate beaten here is not scored).
+   * Whether a running candidate can still win. Its score is −1000 per counted leak + its kills − 0.01 × its position, so
+   * the best it can still reach is what it has now plus everything the stage has not resolved yet: leaks only ever rise
+   * (a leaked enemy is never un-leaked), so the current count is a floor, and every enemy still in play is a kill this
+   * candidate can still make. A candidate whose ceiling no longer beats the best finished one's score cannot win — the
+   * early stop the server's rehearsal always had (a candidate beaten here is not scored), now also covering a candidate
+   * that is losing on kills rather than on leaks.
+   * @param {any} battle the candidate's battle
+   * @param {number} [candidateIndex] the candidate's own position in the run's order (its −0.01 tie-break)
    */
-  alive(battle) {
-    return !(this.leaks < Infinity && rehearsalLeaks(battle, this.playerId) > this.leaks);
+  alive(battle, candidateIndex = 0) {
+    if (!(this.leaks < Infinity)) return true;
+    const c = rehearsalCounts(battle, this.playerId);
+    // the ceiling: no further leak, every unresolved enemy killed, this candidate's own tie-break
+    const ceiling = -c.leaks * 1000 + (c.kills + Math.max(0, c.total - c.kills - c.leaks)) - candidateIndex * 0.01;
+    return ceiling > this.score;
   }
 
   /**
@@ -55,6 +78,7 @@ export class RehearsalScore {
     if (!(score > this.score)) return false;
     this.score = score;
     this.leaks = leaks;
+    this.kills = pp.killed || 0;
     this.index = candidateIndex;
     return true;
   }
@@ -127,7 +151,7 @@ export class RehearsalRun {
             battle.step();
             this.ticks++;
             n++;
-            if ((this.ticks & 63) === 0 && !this.score.alive(battle)) { beaten = true; break; }
+            if ((this.ticks & 15) === 0 && !this.score.alive(battle, this.index)) { beaten = true; break; }
             if (outOfBudget && (n & 3) === 0 && outOfBudget()) return false;
           }
           if (!beaten) {

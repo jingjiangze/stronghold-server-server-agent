@@ -5,6 +5,7 @@
 
 import { PHASE } from '../../../shared/constants.js';
 import { botPrepBeginSteps, botPrepEndSteps } from '../bot.js';
+import { recordPrepLineups } from '../../lineupLibrary.js';
 import { DELAYS } from './common.js';
 
 export class MatchPrep {
@@ -168,6 +169,9 @@ export class MatchPrep {
     const alive = this.alivePlayers();
     for (const ps of alive) this.dispatch(ps, 'onPrepEnd', { round: this.round });
     for (const ps of alive) ps.endPrep();
+    // the humans' final boards are what enters the fight: snapshot them for the lineup library (no-op unless
+    // SP_LINEUP_LIBRARY is set; a record failure never fails a prep — see server/lineupLibrary.js)
+    recordPrepLineups(this);
     const r = this.round;
     if (r === this.gd.bossRound) {
       this.hiddenLayerSum = alive.reduce((s, p) => s + p.activatedLayers(), 0);

@@ -29,6 +29,8 @@
 // The server only auto-listens when this file is the process entry point.
 
 import http from 'node:http';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { getData, loadData } from './data.js';
 import { ROOT, listenAddress, bindCandidates, serveDirs, makeLogger, parseTrustProxy, assetIndexOptionsFrom } from './http/config.js';
 import { WS_MAX_PAYLOAD, createSessionStack, attachWebSocket } from './http/websocket.js';
@@ -39,6 +41,22 @@ import { BUILD_INPUTS, computeBuildTag, buildTag, resetBuildTag } from './http/b
 import { createRequestHandler } from './http/routes.js';
 import { createHealthMetrics } from './healthMetrics.js';
 import { createUpstreamWatch } from './upstreamWatch.js';
+import { createLineupSync } from './lineupSync.js';
+import { publishLibrary, publishOneMode } from './lineupPublish.js';
+import { createLineupOutbox, outboxEnabled } from './lineupOutbox.js';
+import { lineupRemoteSpec, reloadLibrary, lineupDir } from './lineupLibrary.js';
+
+/** Modes a remote lineup library is pulled for (data/config.json's mode ids). SP_LINEUP_SYNC_MODES overrides. */
+const DEFAULT_SYNC_MODES = 'mode_single_normal,mode_single_hard,mode_single_abyss,mode_multi_normal,mode_multi_hard,mode_multi_abyss';
+/** How often a local library is published to the CDN (daily: the content changes slowly and the keys are dated). */
+const LINEUP_PUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/**
+ * The default remote for `SP_LINEUP_MODE=public`: the R2 stable aliases first, the GitHub mirror as a fallback.
+ * Both are read as `<base>/lineups_<modeId>.jsonl` (the name lineupSync composes). The GitHub side must go through
+ * ghfast: raw.githubusercontent.com is DNS-polluted here (3/5 networks reachable).
+ */
+const DEFAULT_PUBLIC_LINEUP_BASES = 'https://speedcdn.jiangjiangze.icu/packs/lineup-library,'
+  + 'https://ghfast.top/https://raw.githubusercontent.com/jingjiangze/stronghold-lineups/data/lineups';
 import { createTrafficCounter } from './http/traffic.js';
 import { createAssetIndex } from './http/assetIndex.js';
 import { createManifestViews } from './http/assetViews.js';
@@ -95,11 +113,73 @@ export async function startServer(opts = {}) {
   // with SP_UPSTREAM_TOKEN it also dispatches the existing workflow_dispatch chains on a real change.
   const upstreamWatch = createUpstreamWatch({ log });
   upstreamWatch.start();
+  // SP_LINEUP_MODE is sugar over SP_LINEUP_LIBRARY — an explicit LIBRARY always wins, and everything below is
+  // untouched: `public` becomes a remote spec (a reader by construction, never publishes), `local` becomes a
+  // directory that may publish back. An unknown value leaves the feature off and says so once.
+  if (!process.env.SP_LINEUP_LIBRARY && process.env.SP_LINEUP_MODE) {
+    const mode = String(process.env.SP_LINEUP_MODE).trim().toLowerCase();
+    if (mode === 'public') {
+      process.env.SP_LINEUP_LIBRARY = `remote:${DEFAULT_PUBLIC_LINEUP_BASES}|${join(tmpdir(), 'stronghold-lineups')}`;
+    } else if (mode === 'local') {
+      process.env.SP_LINEUP_LIBRARY = join(ROOT, 'lineups');
+    } else {
+      log.warn?.(`[lineup] SP_LINEUP_MODE=${mode} 不认识（只支持 public / local）——学习库关闭`);
+    }
+  }
+  // The lineup library (SP_LINEUP_LIBRARY=remote:...) is a read-only remote pulled into a local cache here. Same
+  // pattern as upstreamWatch: fire-and-forget, backoff on failure, unref'd — a library that cannot be fetched only
+  // means the AI falls back to its default layouts. After each pull the cache is dropped so the next bot query reads
+  // the fresh bytes without a restart (lineupLibrary.reloadLibrary).
+  const lineupSpec = lineupRemoteSpec();
+  const lineupSync = lineupSpec && process.env.SP_LINEUP_SYNC !== '0'
+    ? createLineupSync({
+      spec: lineupSpec, log,
+      intervalMs: Number(process.env.SP_LINEUP_SYNC_MS || 0) || undefined,
+      // Which modes to pull. A fresh cache is empty, so this cannot be discovered locally: it is a deploy-time list
+      // (the remote's own inventory), defaulting to the modes data/config.json ships.
+      modes: () => (process.env.SP_LINEUP_SYNC_MODES || DEFAULT_SYNC_MODES).split(',').map((s) => s.trim()).filter(Boolean),
+    })
+    : null;
+  if (lineupSync) {
+    const pullOnce = lineupSync.syncOnce.bind(lineupSync);
+    lineupSync.syncOnce = async () => {
+      const before = lineupSync.state().pulls;
+      await pullOnce();
+      if (lineupSync.state().pulls !== before) reloadLibrary(); // fresh bytes → re-read on the next bot query
+    };
+    lineupSync.start();
+  }
+  // The write-back half: a server with a persistent library volume publishes it to the CDN once a day, so other
+  // servers (and the public mirror) learn from it. Only when a key is configured and the library is local — a
+  // remote-spec server is a reader by construction and must not publish back. Every failure is a log line.
+  const lineupPublishDir = !lineupSpec && process.env.SP_LINEUP_PUBLISH !== '0' ? lineupDir() : null;
+  if (lineupPublishDir) {
+    const publishOnce = async () => {
+      const out = await publishLibrary({ dir: lineupPublishDir, log, env: process.env });
+      log.info?.(`[lineup-publish] ${out.ok} published, ${out.skipped} skipped, ${out.failed} failed${out.error ? ` (${out.error})` : ''}`);
+    };
+    void publishOnce(); // publish at boot too: a restart is the cheapest moment (the volume is already full)
+    const publishTimer = setInterval(publishOnce, LINEUP_PUBLISH_INTERVAL_MS);
+    if (publishTimer.unref) publishTimer.unref();
+  }
   // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
   resetBuildTag();
   buildTag();
 
   const traffic = createTrafficCounter();
+  // The outbox uploader (方案 a，与 lineupPublish 同一发布通道): lineups queued by flushMatchLineups ride the
+  // dedicated data channel (begin → PUT → commit, dated keys) on a timer; offline they accumulate and resume.
+  // "Already published" (409, same-day key) counts as confirmed. Off without credentials — publishOneMode
+  // reports that cleanly and the queue simply holds. A remote-spec server is a reader and never queues (the
+  // gate is in lineupLibrary.flushMatchLineups).
+  const lineupOutbox = outboxEnabled() && !lineupSpec && lineupDir()
+    ? createLineupOutbox({
+      dir: lineupDir(), log,
+      publish: ({ modeId, records }) => publishOneMode({ modeId, records, log, env: process.env }),
+      intervalMs: Number(process.env.SP_LINEUP_OUTBOX_MS || 0) || undefined,
+    })
+    : null;
+  if (lineupOutbox) lineupOutbox.start();
   const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, traffic, assetIndex, views, getHealthMetrics: () => healthMetrics }, log, trustProxy: network.opts.trustProxy }));
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log, traffic });

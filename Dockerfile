@@ -14,6 +14,13 @@
 #
 # Run:  docker run -d --name stronghold -p 3000:3000 --restart unless-stopped stronghold-protocol
 # Env:  PORT (3000), HOST (0.0.0.0), SP_COMBAT (client|server), SP_VERIFY (off|sample|all), TRUST_PROXY (auto|1|0), DEBUG
+#
+# 持久卷（AI 布阵学习库）：镜像不 COPY 任何学习库内容（它是运行时产物，见 server/lineupLibrary.js），
+# 所以这里挂一个**空卷**不会遮掉镜像里的任何东西 —— 想跨容器重建保留学习库就挂它：
+#     -v "$PWD/lineups:/app/lineups"
+# 环境变量 SP_LINEUP_LIBRARY 默认已指向该目录；不挂卷则库写在容器的可写层里，容器重建即丢。
+# ModelScope 创空间（Dockerfile.ms）同样有这个默认值，但平台不给持久卷，所以那边是易失存储 ——
+# 部署形态的完整说明见 docs/DEPLOY.md「AI 布阵学习库」。
 
 ARG NODE_IMAGE=node:22-alpine
 
@@ -65,7 +72,8 @@ ENV NODE_ENV=production \
     SP_GAME_PORT=3120 \
     SP_EDGE_PORT=3130 \
     PORT=3120 \
-    HOST=127.0.0.1
+    HOST=127.0.0.1 \
+    SP_LINEUP_LIBRARY=/app/lineups
 WORKDIR /app
 COPY --from=deps /app/package.json ./package.json
 COPY --from=deps /app/node_modules ./node_modules

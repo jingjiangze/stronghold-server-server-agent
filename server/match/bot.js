@@ -92,6 +92,7 @@ import { withBounties, isFlyKey } from './waves.js';
 import { mitigate } from '../sim/damage.js';
 import { HOVER_KEYS } from '../sim/content/enemies.js';
 import { attackRangeGrid, loadoutRecord, resolveRecordLoadout } from '../../shared/loadoutRecord.js';
+import { humanPlans } from '../lineupLibrary.js';
 
 /**
  * Drive a step generator (planLayoutSteps, createRehearsalSteps, arrangeSteps, botPrepBeginSteps …) to its end in one
@@ -1612,6 +1613,10 @@ export function* arrangeSteps(m, ps, { final = false, defer = false, delegate = 
   const plans = [];
   if (final && m.wave && m.botRehearsal > 0) {
     for (const v of REHEARSAL_VARIANTS) plans.push(yield* planLayoutSteps(m, ps, chosen, { ...LAYOUT_PARAMS, ...v }));
+    // recorded human lineups of this stage / difficulty / round (server/lineupLibrary.js, SP_LINEUP_LIBRARY), mapped
+    // onto the drawn pieces: extra candidates right after the default plan — the slice to botRehearsal keeps them, the
+    // rehearsal alone decides (a candidate that does not simulate better than the parametric ones is never picked)
+    plans.splice(1, 0, ...humanPlans(m, chosen));
   } else {
     plans.push(yield* planLayoutSteps(m, ps, chosen));
   }

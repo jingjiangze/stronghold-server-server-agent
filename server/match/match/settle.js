@@ -9,6 +9,7 @@ import { buildResult } from '../results.js';
 import { FLOW_TICKER_PRIORITY, DELAYS } from './common.js';
 import { msg } from '../../../shared/i18n.js';
 import { onSettle, resetRoundCounters } from '../botEmotes.js';
+import { flushMatchLineups } from '../../lineupLibrary.js';
 
 export class MatchSettle {
   settle(plan, uniteResult) {
@@ -120,6 +121,11 @@ export class MatchSettle {
   finish({ victory, hiddenCleared = false, reason = 'defeat' }) {
     if (this.ended || this.disposed) return;
     this.ended = true;
+    // This is the one place a match really settles — a result is built and onEnd fires. The preps' staged human
+    // lineups become records only here, and only for a reason a lineup can be judged on (victory / defeat): an
+    // abandoned / disposed / crashed match reaches neither and leaves no trace in the library
+    // (server/lineupLibrary.js; a no-op unless SP_LINEUP_LIBRARY is set).
+    flushMatchLineups(this, { victory: !!victory, reason });
     if (this.runner) { try { this.runner.stop(); } catch { /* ignore */ } this.runner = null; }
     this._stopClientCombat();
     this.cancel(this._phaseTimer);

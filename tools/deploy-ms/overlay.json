@@ -16,11 +16,19 @@
     { "path": "server/mirrorProbe.js",                   "kind": "add",   "from": "server/mirrorProbe.js",                   "note": "容器视角抽样测速（每次不同素材/大小分类/缺失表）——跳转层证据源" },
     { "path": "server/upstreamWatch.js",                 "kind": "add",   "from": "server/upstreamWatch.js",                 "note": "容器内上游监听（无 SP_UPSTREAM_TOKEN 时 observe-only）" },
     { "path": "server/healthMetrics.js",                 "kind": "add",   "from": "server/healthMetrics.js",                 "note": "/healthz 性能指标" },
+    { "path": "server/lineupLibrary.js",                 "kind": "add",   "from": "server/lineupLibrary.js",                 "note": "AI 布阵学习库（分模式存取 + 异常过滤）；上游没有" },
+    { "path": "server/lineupSync.js",                    "kind": "add",   "from": "server/lineupSync.js",                    "note": "学习库远端只读同步（remote: 规格 → 本地缓存）；上游没有" },
+    { "path": "server/lineupPublish.js",                 "kind": "add",   "from": "server/lineupPublish.js",                 "note": "学习库写回 CDN（R2 promote 通道）；上游没有。创空间无持久卷 ⇒ 默认不带口令，整条跳过" },
     { "path": "data/local-assets.json",                  "kind": "generated", "from": "data/local-assets.json",              "note": "generated-from-upstream：战场场景清单（当前 12 组；escaped 两关待补→14 组）" },
     { "path": "Dockerfile",                              "kind": "patch", "from": "tools/deploy-ms/Dockerfile.ms",           "baseSha": "33b45355d6cfa71054075ebb54b6876ea57902d1", "note": "平台适配（创空间构建）" },
     { "path": "server/http/files.js",                    "kind": "patch", "from": "tools/deploy-ms/patched/server__http__files.js",   "baseSha": "a9ed003fa57247e164e730cc8219ce15dd0bb92e", "note": "去 br（ms.show 边缘丢 Content-Encoding: br）" },
     { "path": "server/http/static.js",                   "kind": "patch", "from": "tools/deploy-ms/patched/server__http__static.js",  "baseSha": "31b6de3d4f8941dfeee8b5c2096fb9ff21114f9c", "note": "/sp-edge/* 只读路由 + assetJump 接线" },
     { "path": "server/http/routes.js",                   "kind": "patch", "from": "tools/deploy-ms/patched/server__http__routes.js",  "baseSha": "fe3f505d2d1dac6d96e141cb0882f3096876f0cd", "note": "路由补丁" },
-    { "path": "server/index.js",                         "kind": "patch", "from": "tools/deploy-ms/patched/server__index.js",         "baseSha": "9d2f9943825032396b994227706b68064f17067a", "note": "装配接线（跳转/健康/监听/测速）" }
+    { "path": "server/index.js",                         "kind": "patch", "from": "tools/deploy-ms/patched/server__index.js",         "baseSha": "9d2f9943825032396b994227706b68064f17067a", "note": "装配接线（跳转/健康/监听/测速/学习库同步与发布）" },
+    { "path": "server/match/bot.js",                     "kind": "patch", "from": "tools/deploy-ms/patched/server__match__bot.js",   "baseSha": "3b640a0cad17e9fcf2bacc30b4ede77f5d9e9eb7", "note": "arrangeSteps 插入学习库候选（plans.splice(1,0,...humanPlans)）" },
+    { "path": "server/match/match/prep.js",              "kind": "patch", "from": "tools/deploy-ms/patched/server__match__match__prep.js",  "baseSha": "053a9c7647a1fe08f44938114f3ef44e5899f086", "note": "endPrep 暂存真人布阵（recordPrepLineups）" },
+    { "path": "server/match/match/settle.js",            "kind": "patch", "from": "tools/deploy-ms/patched/server__match__match__settle.js", "baseSha": "ca74bffe498ca4dd82b73a493fd7c0f10cbaf44d", "note": "finish 传 outcome 给 flushMatchLineups（异常对局不入库）" },
+    { "path": "server/match/match/platform.js",          "kind": "patch", "from": "tools/deploy-ms/patched/server__match__match__platform.js", "baseSha": "bd1206efb7e3fb7fb1ab5a6ac72b4b71c473a3bb", "note": "dispose 丢弃未结算的暂存布阵（dropStagedLineups）" },
+    { "path": "server/sim/rehearsal.js",                 "kind": "patch", "from": "tools/deploy-ms/patched/server__sim__rehearsal.js",  "baseSha": "ad3f24cd882aad7c2880bea506fc9553a8bf1327", "note": "试算提前退出改按分数天花板（leaks+kills），学习库候选同样走这条比较；经 /sim/ 下发给浏览器" }
   ]
 }

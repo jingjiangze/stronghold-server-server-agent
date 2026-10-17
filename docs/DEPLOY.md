@@ -262,6 +262,90 @@ services:
       SP_VERIFY: "off"
 ```
 
+### 3.1 AI 布阵学习库：挂一个持久卷（可选）
+
+设了 `SP_LINEUP_LIBRARY` 的服务器会把真人玩家的最终布阵（含朝向）写进本地库，AI 队友整备时检索同玩法 / 同关卡 / 同难度的记录作为额外候选。**不挂卷，库就写在容器可写层里，`docker rm` / 重建镜像即丢**——写回 CDN 与学习历史都从零开始。
+
+```bash
+# 普通服务器部署：库目录单独挂一个卷
+docker run -d --name stronghold -p 3000:3000 --restart unless-stopped \
+  -v "$PWD/lineups:/app/lineups" \
+  -e SP_LINEUP_LIBRARY=/app/lineups \
+  -e SP_LINEUP_PUBLISH=1 \
+  -e CDN_ADMIN_KEY="<上传后台口令>" \
+  stronghold-protocol
+```
+
+镜像里 `SP_LINEUP_LIBRARY` 已默认为 `/app/lineups`，所以只挂卷就够；上面的 `-e` 是把四个变量的关系写清楚。几点说明：
+
+- **挂载点刻意选 `/app/lineups` 而不是 `/app/data`**：空卷会遮住镜像里 COPY 进去的内容，而镜像本来不含任何学习库文件，所以这里挂空卷是安全的。挂在别处也可以，但 `/app/lineups` 是镜像里已经声明的默认值。
+- 库目录不需要预先创建，服务器首次写入时会自己建；宿主目录建议先用 `mkdir -p lineups` 建好并把属主改成容器内 `node` 用户（uid 1000），否则首写会因权限失败——失败只丢学习功能，不影响开服。
+- `SP_LINEUP_PUBLISH=1` + `CDN_ADMIN_KEY` 让这台服务器每天把库发到 CDN（`packs/lineup-library/<模式>-<日期>.jsonl`），别的服务器与公开镜像就能学到它。口令只走环境变量或 `~/.cdn_admin_key` 文件，不会出现在命令行参数或日志里。没有口令时该模块整条跳过，不是错误。
+- **反向配置**（只学不写）：`SP_LINEUP_LIBRARY=remote:<镜像地址1,镜像地址2>|<本地缓存目录>`，服务器从 CDN / 镜像只读拉取，本地只留缓存，不发布。适合不想暴露自己布阵数据的部署。
+- 学习库本身有滚动上限（默认 4000 行 / 3 MiB，取最新的一段），不会慢慢把磁盘填满；单份超过 3 MiB 的文件不会发往 CDN。
+
+compose 写法（库目录与上面等价）：
+
+```yaml
+services:
+  stronghold:
+    build:
+      context: .
+      args: { FETCH_ASSETS: "1" }
+    ports: ["3000:3000"]
+    restart: unless-stopped
+    volumes:
+      - ./lineups:/app/lineups
+    environment:
+      SP_VERIFY: "off"
+      SP_LINEUP_LIBRARY: /app/lineups
+      SP_LINEUP_PUBLISH: "1"
+      CDN_ADMIN_KEY: "<上传后台口令>"
+```
+
+### 3.2 魔搭创空间部署：容器即易失，学习库不进本地
+
+创空间每次 push 都重建镜像（`deploy-ms.yml` 拉上游树 + 叠加层 → 全树重建），平台**不提供持久卷**，容器内写的任何内容都随旧容器销毁。所以这条路径上：
+
+- 镜像仍带 `SP_LINEUP_LIBRARY=/app/lineups` 的默认值，但那只是容器内的临时目录：**重启即清空，不要把它当存储**。
+- 想让创空间那台学到东西，用只读远端：在创空间的环境变量里设 `SP_LINEUP_LIBRARY=remote:<CDN 或镜像地址>|<容器内缓存目录>`（缓存目录用 `/tmp/lineups` 一类易失路径即可）。它拉取别人发布到 CDN 的库，自己不写回。
+- 反过来，**不要**给创空间配 `CDN_ADMIN_KEY`：没有持久卷，发出去的是每次重启都会丢的一段样本，还会把凭据放进一个公开平台的环境变量里。
+
+两条路径的完整对照：
+
+| | 普通服务器部署 | 魔搭创空间部署 |
+|---|---|---|
+| 本地库 | 有（挂卷后跨重建保留） | 无（容器易失，重启即丢） |
+| 读取 | 本地库优先，可按需叠加 remote | 只能 remote 只读拉取 |
+| 写回 CDN | 支持（需 `CDN_ADMIN_KEY`） | 不支持（不发凭据、样本也会丢） |
+| 适用 | 自己机器 / VPS，长期开服 | 公开展示、体验一局就走 |
+
+### 3.3 一个变量选「公共托管」还是「自行存储」
+
+`SP_LINEUP_MODE` 只是 `SP_LINEUP_LIBRARY` 的默认值翻译器；**显式设了 `SP_LINEUP_LIBRARY` 时以它为准**。
+
+| 值 | 读到什么 | 写回 |
+|---|---|---|
+| `public` | 只读公共镜像：R2 稳定别名优先、GitHub 镜像兜底（走 `ghfast.top`），缓存落系统临时目录 | 不写回（remote 规格的服务器是纯读者） |
+| `local` | 本机目录（非 Docker 为 `<server>/lineups`；镜像里是 `/app/lineups`，可挂卷） | 可写回（配合上传口令 / outbox） |
+| 不设 | 功能关闭 | — |
+
+```bash
+# 只读公共托管：不占本地磁盘，容器重建不丢数据
+docker run -d --name stronghold -p 3000:3000 \
+  -e SP_LINEUP_MODE=public stronghold-protocol
+
+# 自行存储：自己攒库并写回 CDN
+docker run -d --name stronghold -p 3000:3000 \
+  -e SP_LINEUP_MODE=local \
+  -v "$PWD/lineups:/app/lineups" \
+  -e CDN_ADMIN_KEY="<上传后台口令>" stronghold-protocol
+```
+
+公共镜像的两个地址、文件布局与上传规则见仓库 `jingjiangze/stronghold-lineups` 的 README。
+数据只收 `packs/lineup-library/<模式>-<YYYY-MM-DD>.jsonl`，走专用通道 `/api/lineup/*`（来源固定 `lineup-library`，
+其它前缀/扩展名三步都拒绝）。
+
 ## 4. macOS / Linux 常驻
 
 - 临时开服：`scripts/start.sh`（或 `npm start`），保持终端窗口打开。macOS 首次会询问是否允许 node 接受传入连接，选「允许」。
