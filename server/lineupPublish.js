@@ -1,4 +1,5 @@
 // server/lineupPublish.js — 把本地布阵学习库发出去：GitHub 只读镜像 + R2 promote 写回。
+// (i18n-ignore-file: 上传失败原因与运维日志，不进 UI —— 由中心/日志消费，见 docs/I18N.md)
 //
 // 为什么不是「服务器直接推 GitHub」：玩家服务器（含魔搭容器）没有、也不该有 GitHub 写权限——
 // 一个被拿下的服务器不该能改公共镜像。所以写回走既有的后台上传通道（R2 staging → promote），
