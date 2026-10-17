@@ -36,7 +36,9 @@ test('the listen entry points default to ::, and the image stays on IPv4', () =>
   assert.match(doc('scripts/launch.mjs'), /process\.env\.HOST \|\| '::'/);
   assert.match(doc('tools/doctor.mjs'), /process\.env\.HOST \|\| '::'/);
   assert.match(doc('README.md'), /\| `HOST` \| `::` \|/);
-  assert.match(doc('Dockerfile'), /HOST=0\.0\.0\.0/);
+  // 镜像的意图是「游戏进程不走 IPv6」：当前拓扑是 nginx 占 7860 对外、游戏在容器内监听
+  // 127.0.0.1:3120（见 Dockerfile 的拓扑注释），任何 IPv4 字面量都满足这条断言。
+  assert.match(doc('Dockerfile'), /HOST=(?:0\.0\.0\.0|127\.0\.0\.1)/);
   assert.doesNotMatch(doc('Dockerfile'), /HOST=::/);
 });
 
