@@ -167,20 +167,23 @@ describe('static http server', () => {
     assert.equal(redirect.headers.location, '/sub/?x=1');
   });
 
-  test('javascript: correct MIME, brotli when named, gzip when accepted, identity otherwise', async () => {
+  test('javascript: correct MIME, gzip when accepted, identity otherwise (br is never chosen)', async () => {
+    // pickEncoding is gzip-only since 2026-10-13: the ModelScope edge forwards brotli bytes but drops
+    // `Content-Encoding: br`, which renders garbage in the browser (server/http/files.js).
     const br = await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip, deflate, br' } });
     assert.equal(br.status, 200);
     assert.equal(br.headers['content-type'], 'text/javascript; charset=utf-8');
-    assert.equal(br.headers['content-encoding'], 'br', 'a browser on an HTTPS page (or localhost) names br');
+    assert.equal(br.headers['content-encoding'], 'gzip', 'a browser naming br still gets gzip');
     assert.equal(br.headers.vary, 'Accept-Encoding');
     assert.equal(Number(br.headers['content-length']), br.body.length);
-    assert.equal(zlib.brotliDecompressSync(br.body).toString(), js);
+    assert.equal(zlib.gunzipSync(br.body).toString(), js);
     const gz = await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip, deflate' } });
     assert.equal(gz.headers['content-encoding'], 'gzip', 'a LAN http:// page: gzip');
     assert.equal(zlib.gunzipSync(gz.body).toString(), js);
     // cached second responses are identical
     assert.deepEqual((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip' } })).body, gz.body);
-    assert.deepEqual((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'br' } })).body, br.body);
+    const brOnly = await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'br' } });
+    assert.equal(brOnly.headers['content-encoding'], undefined, 'br alone falls back to identity');
 
     const plain = await httpReq(srv.port, '/js/app.js');
     assert.equal(plain.headers['content-encoding'], undefined);
@@ -216,26 +219,23 @@ describe('static http server', () => {
     const skelGz = await httpReq(srv.port, '/assets/spine/x.skel', { headers: { 'accept-encoding': 'gzip' } });
     assert.deepEqual(zlib.gunzipSync(skelGz.body), skel);
     const skelBr = await httpReq(srv.port, '/assets/spine/x.skel', { headers: { 'accept-encoding': 'gzip, br' } });
-    assert.equal(skelBr.headers['content-encoding'], 'br');
-    assert.deepEqual(zlib.brotliDecompressSync(skelBr.body), skel);
+    assert.equal(skelBr.headers['content-encoding'], 'gzip');
+    assert.deepEqual(zlib.gunzipSync(skelBr.body), skel);
     // media is never compressed, whatever the client names
     assert.equal((await httpReq(srv.port, '/assets/audio/bgm.mp3', { headers: { 'accept-encoding': 'br, gzip' } })).headers['content-encoding'], undefined);
     assert.equal((await httpReq(srv.port, '/assets/img/a.png', { headers: { 'accept-encoding': 'br' } })).headers['content-encoding'], undefined);
   });
 
-  test('a file over the compression cache limit is compressed as a stream (brotli and gzip); HEAD sends no body', async () => {
-    const br = await httpReq(srv.port, '/js/huge.js', { headers: { 'accept-encoding': 'br' } });
-    assert.equal(br.headers['content-encoding'], 'br');
-    assert.equal(br.headers['content-length'], undefined, 'streamed: no length up front');
-    assert.equal(zlib.brotliDecompressSync(br.body).toString(), big);
-    assert.ok(br.body.length < big.length / 4);
+  test('a file over the compression cache limit is compressed as a stream (gzip); HEAD sends no body', async () => {
     const gz = await httpReq(srv.port, '/js/huge.js', { headers: { 'accept-encoding': 'gzip' } });
     assert.equal(gz.headers['content-encoding'], 'gzip');
+    assert.equal(gz.headers['content-length'], undefined, 'streamed: no length up front');
     assert.equal(zlib.gunzipSync(gz.body).toString(), big);
-    const head = await httpReq(srv.port, '/js/huge.js', { method: 'HEAD', headers: { 'accept-encoding': 'br' } });
+    assert.ok(gz.body.length < big.length / 4);
+    const head = await httpReq(srv.port, '/js/huge.js', { method: 'HEAD', headers: { 'accept-encoding': 'gzip' } });
     assert.equal(head.status, 200);
     assert.equal(head.body.length, 0);
-    assert.equal(head.headers['content-encoding'], 'br');
+    assert.equal(head.headers['content-encoding'], 'gzip');
   });
 
   test('ETag / Last-Modified revalidation and Cache-Control policy', async () => {
@@ -255,10 +255,10 @@ describe('static http server', () => {
     assert.equal(stale.status, 200);
     const gzEtag = (await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip' } })).headers.etag;
     assert.notEqual(gzEtag, etag, 'gzip variant has its own ETag');
-    const brEtag = (await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'br' } })).headers.etag;
-    assert.equal(brEtag, etag.replace(/"$/, '-br"'), 'so has the brotli variant');
-    assert.equal((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'br', 'if-none-match': brEtag } })).status, 304);
-    assert.equal((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip', 'if-none-match': brEtag } })).status, 200, 'not the gzip variant');
+    const idEtag = (await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'br' } })).headers.etag;
+    assert.equal(idEtag, etag, 'br alone is identity — same ETag as the uncompressed variant');
+    assert.equal((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip', 'if-none-match': gzEtag } })).status, 304);
+    assert.equal((await httpReq(srv.port, '/js/app.js', { headers: { 'accept-encoding': 'gzip', 'if-none-match': etag } })).status, 200, 'not the identity variant');
 
     // unversioned art/fonts/vendor: cached for a day (files can be rewritten in place by the asset tools); the art and
     // fonts carry their content hash as ETag (server/http/assetIndex.js), so a rewrite with the same bytes is a 304
@@ -427,13 +427,13 @@ describe('static http server', () => {
     assert.equal(acceptsGzip('*;q=0'), false);
     assert.equal(acceptsGzip('br'), false);
     assert.equal(acceptsGzip(undefined), false);
-    // brotli when named at least as high as gzip; `*` alone never picks it
-    assert.equal(pickEncoding('gzip, deflate, br, zstd'), 'br');
+    // gzip-only (the edge strips Content-Encoding: br — files.js pickEncoding); br alone means identity
+    assert.equal(pickEncoding('gzip, deflate, br, zstd'), 'gzip');
     assert.equal(pickEncoding('gzip, deflate'), 'gzip');
     assert.equal(pickEncoding('br;q=0, gzip'), 'gzip');
     assert.equal(pickEncoding('br;q=0.5, gzip'), 'gzip');
-    assert.equal(pickEncoding('gzip;q=0.5, br'), 'br');
-    assert.equal(pickEncoding('br'), 'br');
+    assert.equal(pickEncoding('gzip;q=0.5, br'), 'gzip');
+    assert.equal(pickEncoding('br'), null);
     assert.equal(pickEncoding('*'), 'gzip');
     assert.equal(pickEncoding('*;q=0'), null);
     assert.equal(pickEncoding('identity'), null);

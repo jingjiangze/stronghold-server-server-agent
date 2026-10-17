@@ -95,6 +95,9 @@ export const PLAYER_TOOLS = ['tools/crop-board-atlas.mjs', 'tools/doctor.mjs', '
 export const PLAYER_TOOL_DIRS = ['tools/assets/', 'tools/local-extract/'];
 /** Whole runtime directories (their tracked files). */
 export const RUNTIME_DIRS = ['server/', 'shared/', 'data/', 'public/', 'packs/'];
+/** Runtime files outside those dirs: server/http/asset-jump.js imports the edge sidecar's pure functions
+ *  (one implementation of the whitelist / path checks / ?sp_source override — the module says never to copy it). */
+export const RUNTIME_EDGE = ['deploy/stardust/ms-edge/edge-sidecar.mjs'];
 /** Written into the stage, never taken from the checkout: the pack index of the shipped packs. */
 export const GENERATED_PACK_INDEX = 'packs/index.json';
 /** Whether shipped files include a content pack (then the stage gets GENERATED_PACK_INDEX). @param {string[]} files */
@@ -163,6 +166,7 @@ export function isPlayerFile(rel) {
   if (!p || isRefused(p) || isJunk(p) || p === 'data/local-assets.json' || p === GENERATED_PACK_INDEX) return false;
   if (NOT_TRACKED_SHIP.some((d) => p.startsWith(d))) return false;
   if (RUNTIME_DIRS.some((d) => p.startsWith(d)) || PLAYER_TOOL_DIRS.some((d) => p.startsWith(d))) return true;
+  if (RUNTIME_EDGE.includes(p)) return true;
   return ROOT_FILES.includes(p) || PLAYER_DOCS.includes(p) || RUNTIME_RESEARCH.includes(p) || PLAYER_SCRIPTS.includes(p) || PLAYER_TOOLS.includes(p);
 }
 

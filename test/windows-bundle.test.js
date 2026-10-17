@@ -41,7 +41,10 @@ describe('make-windows-bundle.mjs: --out 不能指向仓库自己或它的上级
     // Linux 的默认文件系统区分大小写：`/HOME/X` 就是另一个目录，放行才对。
     const sameThing = process.platform !== 'linux';
     assert.equal(outDirIsUnsafe(ROOT.toUpperCase()), sameThing, `大写写法的仓库路径（${ROOT.toUpperCase()}）`);
-    assert.equal(outDirIsUnsafe(ROOT.replace(/\//g, path.sep).toLowerCase()), sameThing, '全小写写法');
+    // 翻转每个字母的大小写：在任何文件系统上都得到一个不同的字符串（Linux 的 CI 路径本来就全小写，
+    // 用 toLowerCase() 会是恒等变换，断言就失去意义）；大小写不敏感的系统上它仍是同一个目录。
+    const flipped = ROOT.replace(/[a-zA-Z]/g, (c) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()));
+    assert.equal(outDirIsUnsafe(flipped), sameThing, '大小写翻转写法');
   });
 
   test('经过符号链接的路径会被认出来（macOS 的 /tmp 就是指向 /private/tmp 的链接）', async () => {
