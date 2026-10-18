@@ -379,7 +379,11 @@ test('a lineup replayed far too often in one hour is a farm, not a player', asyn
     const m = fakeMatch({ seats: [{ bot: false, board: once }] });
     recordPrepLineups(m);
     flushMatchLineups(m, { victory: true, reason: 'victory' });
-    await new Promise((r) => setTimeout(r, 40));
+    // 45 次 append 是 fire-and-forget：轮询到最后一局（char_a）落盘，别拿固定 40ms 赌机器快慢
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && !readFileSync(file, 'utf8').includes('char_a')) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
     const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
     const farmLines = lines.filter((l) => l.includes('farm_a'));
     // the first replays are a real player trying a real lineup; past the cap the same signature stops being written
