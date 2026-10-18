@@ -50,9 +50,13 @@
 ### T2 · 对局粗快照（真要「接着这一局」）
 
 - 恢复点选 **PREP 进入时**（`startRound` 会清空场/runner/wave，最干净；COMBAT/UNITE 有活战斗对象不可序列化）。
-- 必须存：Match 身份（seed/roomCode/mode/difficulty/modeId/cs/vs/isSolo/aiPicksLast）、players+order、
-  spectators、phase/round、SharedPool（cap/left/tier+banned）、SharedItemPool+debt、uidSeq、
-  stageId/stage/layout/stageForced、factions/bossId/hiddenBossId、disabledBonds/bannedChess。
+- 必须存（字段名已按 `server/match/Match.js` 构造函数核对）：Match 身份
+  `seed / roomCode / mode / difficulty / modeId / isSolo / aiPicksLast / battlePrefix`、`players` + `order` +
+  `spectators`、`phase / round / uidSeq / deadline / overtimeAt`、`pool`（cap/left/tier + banned）、
+  `itemPool`（left 由持有推导）、`diyStock`（玩家私有 stock，含负值）、`stageId / stage / factions /
+  bossId / hiddenBossId / bossPairs`、`disabledBonds / staticInactiveBonds / bannedChess`、六条 RNG 的 `state()`、
+  `teamLp / bossPool(hp+byPlayer) / hiddenLayerSum / outcome`、`draft / sp / wave / bossWaves`。
+  ⚠️ 早版本这里写的 `cs / vs / stageForced` 在当前代码里不存在（审计核对时发现），已更正。
 - RNG 可精确续流：`rng.state()` 存、`createRng(savedState)` 恢复（6 个流）。
 - 难点：有玩法插件的房间对局跑在独立子进程（父进程只有 MatchProxy），快照要么子进程自己写盘，
   要么由它上报；漏一个字段就会出现怪状态。工作量天级。
