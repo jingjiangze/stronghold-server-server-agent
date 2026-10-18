@@ -149,8 +149,14 @@ test('a library past the cap is rolled back to its newest lines on the next appe
     const m = fakeMatch({ seats: [{ bot: false, board: board([['9,3', 'char_a', 'UP'], ['9,4', 'char_b', 'LEFT']]) }] });
     recordPrepLineups(m);
     flushMatchLineups(m);
-    await new Promise((r) => setTimeout(r, 50));
-    const lines = readFileSync(file, 'utf8').trim().split('\n');
+    // The append and the roll are fire-and-forget: poll until the rewrite lands (a loaded CI
+    // runner can need more than a fixed 50 ms to rewrite 4000 lines), then assert on the settled file.
+    let lines = [];
+    const deadline = Date.now() + 5000;
+    do {
+      await new Promise((r) => setTimeout(r, 25));
+      lines = readFileSync(file, 'utf8').trim().split('\n');
+    } while (lines.length > 4000 && Date.now() < deadline);
     assert.ok(lines.length <= 4000, `the file must stay at or under the cap, got ${lines.length}`);
     assert.ok(lines.length >= 3600, `the roll keeps the newest 90%, got ${lines.length}`);
     assert.ok(!lines.some((l) => l.includes('"p0_a"')), 'the oldest decile is the part that goes');
