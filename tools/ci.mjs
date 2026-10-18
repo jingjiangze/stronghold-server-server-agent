@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The env of ci.yml's job `test` (test/ci.test.js compares it with the workflow). */
-export const CI_TEST_ENV = { SP_E2E: '0', SP_REAL_E2E: '0', RENDER_E2E: '0', NO_COLOR: '1' };
+export const CI_TEST_ENV = { SP_E2E: '0', SP_REAL_E2E: '0', RENDER_E2E: '0', NO_COLOR: '1', SP_LINEUP_MODE: 'off' };
 
 /** The paths the smoke step requests (the curl URLs of ci.yml's smoke step; test/ci.test.js compares them). */
 export const SMOKE_PATHS = ['/healthz', '/', '/vendor/pixi.min.js'];

@@ -110,7 +110,7 @@ test('arguments: --keep-going, --only (comma list, repeated, = form) in workflow
 test("env: the job test steps get ci.yml's env for unset keys only; the tooling steps get the caller's env as is", () => {
   const test_ = STEPS.find((s) => s.id === 'test');
   const lint = STEPS.find((s) => s.id === 'lint');
-  assert.deepEqual(stepEnv(test_, { PATH: 'p', SP_E2E: '1' }), { PATH: 'p', SP_E2E: '1', SP_REAL_E2E: '0', RENDER_E2E: '0', NO_COLOR: '1' });
+  assert.deepEqual(stepEnv(test_, { PATH: 'p', SP_E2E: '1' }), { PATH: 'p', SP_E2E: '1', SP_REAL_E2E: '0', RENDER_E2E: '0', NO_COLOR: '1', SP_LINEUP_MODE: 'off' });
   assert.deepEqual(stepEnv(lint, { PATH: 'p' }), { PATH: 'p' });
 });
 
