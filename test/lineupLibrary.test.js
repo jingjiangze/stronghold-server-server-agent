@@ -79,7 +79,7 @@ test('a human prep is recorded once (deduped), bots are skipped, then a bot can 
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -106,7 +106,7 @@ test('recorded pieces the bot did not draw are dropped; a lineup mapping fewer t
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -127,7 +127,7 @@ test('lineups of another stage / difficulty / round are not offered', async () =
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -165,7 +165,7 @@ test('a library past the cap is rolled back to its newest lines on the next appe
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -192,7 +192,7 @@ test('a library past the byte cap is rolled on the next append too', async () =>
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -220,7 +220,7 @@ test('SP_LINEUP_LIBRARY may name a DIRECTORY: the library becomes one file per m
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -255,7 +255,7 @@ test('a directory keeps every mode in its own file and its own key space', async
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -289,7 +289,7 @@ test('the single-file layout still keys everything together (the pre-split upgra
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -319,7 +319,7 @@ test('a match that never settles records nothing; its disposal drops what it sta
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -357,7 +357,7 @@ test('a settlement that is not a real result publishes nothing', async () => {
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -393,7 +393,7 @@ test('a lineup replayed far too often in one hour is a farm, not a player', asyn
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -430,7 +430,7 @@ test('cells outside the field, or with an unknown facing, are not a lineup', asy
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -455,7 +455,7 @@ test('an externally synced library is picked up after reloadLibrary, without a r
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 

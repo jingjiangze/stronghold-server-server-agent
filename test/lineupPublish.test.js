@@ -89,7 +89,7 @@ test('only real, non-empty, in-budget, non-partial library files are published',
     assert.equal(publishableFile(good, { isFile: () => true, size: 9 * 1024 * 1024 }).ok, false, 'oversized means roll failed or someone is flooding');
     assert.equal(publishableFile(join(dir, 'lineups_x.jsonl.partial'), { isFile: () => true, size: 5 }).ok, false, 'a half-written temp file is never published');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -108,8 +108,8 @@ test('with no admin key nothing is uploaded and nothing throws', async () => {
     assert.match(out.error, /口令/);
     assert.ok(logs.some((l) => l.includes('口令')), 'the reason is logged');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
-    rmSync(emptyHome, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    rmSync(emptyHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -150,7 +150,7 @@ test('the whole chain runs for real against a local CDN stand-in: begin → pres
       for (const c of seen.commits) assert.equal(c.size, Number(c.size));
     });
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -166,7 +166,7 @@ test('a key that already exists (409) counts as published, not as a failure', as
       assert.equal(seen.puts.length, 0, 'and no bytes were pushed for a key that already exists');
     });
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -181,7 +181,7 @@ test('a CDN that rejects the upload is reported per-file and never throws', asyn
       assert.ok(out.files.some((f) => /bad key/.test(f.reason || '')), 'the reason is kept');
     });
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -208,7 +208,7 @@ test('files the publisher must never touch are ignored (only lineups_*.jsonl mat
       assert.equal(seen.puts.length, 1);
     });
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -254,6 +254,6 @@ test('publishOneMode: no key and empty records are clean non-ok answers, never t
     assert.equal(empty.ok, false);
     assert.match(empty.reason, /没有可发布/);
   } finally {
-    rmSync(emptyHome, { recursive: true, force: true });
+    rmSync(emptyHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });

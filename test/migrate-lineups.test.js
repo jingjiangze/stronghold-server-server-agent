@@ -28,7 +28,7 @@ test('dry-run reports the split and writes nothing', () => {
     assert.equal(rep.groups, 2);
     assert.ok(existsSync(join(dir, 'lineups_mode_single_hard.jsonl')), 'the old file is untouched');
     assert.ok(!existsSync(join(dir, 'lineups_mode_single_hard__HARD.jsonl')));
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('--apply splits by difficulty and renames the old file; a second run is a no-op', () => {
@@ -46,7 +46,7 @@ test('--apply splits by difficulty and renames the old file; a second run is a n
     assert.ok(!existsSync(join(dir, 'lineups_mode_single_hard.jsonl')));
     const again = migrate(dir, { apply: true, log: () => {} });
     assert.equal(again.files, 0, 'nothing left to migrate');
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('an existing new-layout file is appended to, never overwritten', () => {
@@ -56,5 +56,5 @@ test('an existing new-layout file is appended to, never overwritten', () => {
     migrate(dir, { apply: true, log: () => {} });
     const hard = readFileSync(join(dir, 'lineups_mode_single_hard__HARD.jsonl'), 'utf8').trim().split('\n');
     assert.deepEqual(hard.map((l) => JSON.parse(l).sig), ['pre', 'h1', 'h2']);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });

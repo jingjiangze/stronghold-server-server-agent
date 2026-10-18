@@ -47,7 +47,7 @@ test('aggregates dated files into one deduped library, newest kept under --max-l
     assert.equal(stats.keys['mode_single_hard__HARD'].rows, 3);
     assert.equal(stats.keys['mode_single_hard__HARD'].features.count, 3, 'features are summarized per library');
     assert.equal(stats.keys['mode_multi_hard__HARD'].rows, 1);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('--since drops older dated files; --max-lines keeps the newest rows', () => {
@@ -58,7 +58,7 @@ test('--since drops older dated files; --max-lines keeps the newest rows', () =>
     const rep = aggregate([root], { since: '2026-10-01', maxLines: 2, log: () => {} });
     assert.equal(rep.rowsOut, 2, 'only two of the three rows survive --max-lines');
     assert.equal(rep.keys['mode_single_hard__HARD'].rows, 2);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('sigOf matches the server-side signature (sort of id:golden:row:col:dir)', () => {
