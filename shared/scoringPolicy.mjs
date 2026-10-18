@@ -1,4 +1,5 @@
 // shared/scoringPolicy.mjs — 客户端什么时候允许跑「布阵评分」模拟（纯函数，浏览器与 Node 通用）。
+// (i18n-ignore-file: reason 是给开发者/调试看的判定理由，不进 UI —— 见 docs/I18N.md)
 //
 // 用户裁决的优先级（高 → 低）：
 //   1. 托管中（away 或 autoplay）：玩家把操作交给 AI，页面本来就不等他 → 优先跑模拟；

@@ -1,4 +1,5 @@
 // public/js/ai/scoringRunner.js — 客户端「布阵评分」的调度壳（策略 + 可中断队列 + Worker 执行）。
+// (i18n-ignore-file: 日志与中断原因是诊断输出，不进 UI —— 见 docs/I18N.md)
 //
 // 分层（便于在 Node 里测，不把 DOM 拖进断言）：
 //   shared/scoringPolicy.mjs  决定「现在能不能跑、跑多快」——纯函数；
