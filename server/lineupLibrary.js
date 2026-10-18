@@ -36,7 +36,7 @@
 // mount or a not-yet-created library directory just works.
 
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
-import { appendFile, writeFile } from 'node:fs/promises';
+import { appendFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
 import { boardOrder, tileKey, pieceDir, inField } from './match/board.js';
 import { isDir as isDirName } from './sim/dir.js';
@@ -413,10 +413,16 @@ async function roll(file, lib) {
   while (keepFrom < lib.lines - 1 && bytesFrom(keepFrom) > MAX_BYTES) keepFrom++;
   const kept = lib.order.slice(keepFrom);
   const body = kept.map((l) => l + '\n').join('');
+  // Write the window to a temp file and rename it into place: an in-place writeFile leaves the file
+  // PARTIAL while it runs, and a concurrent reader (another process's publisher/syncer, a test) sees a
+  // truncated library. rename() is atomic: a reader sees either the old window or the new one.
+  const tmp = `${file}.${process.pid}.partial`;
   try {
-    await writeFile(file, body, 'utf8');
+    await writeFile(tmp, body, 'utf8');
+    await rename(tmp, file);
   } catch (e) {
     console.error('[lineupLibrary] roll failed:', e && e.message);
+    try { await rm(tmp, { force: true }); } catch { /* best effort */ }
     return; // counters stay high so the next append retries the roll; the file is at most one decile over
   }
   lib.lines = kept.length;
