@@ -65,6 +65,9 @@
 | R2 历史枚举与别名 | 已有（CDN 仓，`edc7c66` 起） |
 | 历史聚合工具（去重/过滤/统计） | **已实现**：`tools/lineups-aggregate.mjs` + 5 例测试 |
 | 客户端特征化 | **已实现**：`shared/lineupFeatures.mjs`（纯函数，随内核可导出到 ai-local） |
-| 客户端评分闭环 | 设计完成，**未接线**：需要「抽样下发 + 回报通道 + 质量表」三段，且回报通道要复用专用通道 |
+| 客户端调度策略（优先级/机型/中断） | **已实现**：`shared/scoringPolicy.mjs`（托管 > 房间 > 高配空闲；低配不跑；不可见/离线立即停）+ `shared/scoringQueue.mjs`（预算、暂停、单条/全量中断） |
+| 客户端评分执行壳 | **已实现**：`public/js/ai/scoringRunner.js`（信号 → 决策 → 队列 → Worker）+ Worker 新增 `t:'score'` 模式，返回每条 `{index, built, leaks, kills, score}` |
+| 任务来源（抽样下发 / 从公共库拉取） | **未接线**：`nextTask()` 注入点留空——服务端下发 `b.scoring` 或客户端按 `libraryKey` 拉别名都要先定 |
+| 回报通道（评分送回中心） | **未接线**：`report()` 注入点留空，需要复用专用数据通道（只收训练文件） |
 | 多方一致 / 降权策略 | 设计完成，未实现 |
 | 真·模型训练 | 未做（当前不需要） |
