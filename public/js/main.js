@@ -56,6 +56,7 @@ import { installLoadoutSync, installOwnershipSync, installDiySync } from './ui/l
 import { startBuildGuard } from './ui/buildGuard.js';
 import { initLang, useLang, tickerText } from './ui/lang.js';
 import { t, N_, translateWire } from '../../shared/i18n.js';
+import { pickResumeTarget } from '../../shared/resumeTarget.mjs';
 import { recordError, installTrafficMeter } from './diag.js';
 
 const RESTORE_GRACE_MS = 1500;
@@ -160,9 +161,16 @@ function onWelcome(msg) {
   if (prevId != null && prevId !== msg.playerId) {
     // A brand-new server session (the server restarted — crashed / killed, so no room.closed arrived — or this session
     // expired on it): whatever we showed before is gone — back to the lobby cleanly and say why.
+    // Local data still has one useful thing: the room code this browser last played in (sp.matches, per token).
+    // When that record is fresh, try to re-enter the room — a server that restored room shells (drain deploy +
+    // snapshot/restore) accepts the join; otherwise the ordinary failure path lands in the lobby anyway.
+    const resume = pickResumeTarget(identity.recoverable());
     const notice = sessionResetNotice(prev, msg.playerId);
     backToLobby();
-    if (notice) toast(t(notice), 'warn', { ttl: 7000 });
+    if (resume) {
+      store.patch('ui', { pendingJoin: resume.code });
+      toast(t('正在尝试回到房间 {code}', { code: resume.code }), 'info', { ttl: 5000 });
+    } else if (notice) toast(t(notice), 'warn', { ttl: 7000 });
   } else if (prev.room || prev.match.public) {
     // Resumed session: the server re-pushes room/match state; drop whatever it doesn't.
     store.patch('ui', { restoring: true });
@@ -195,7 +203,7 @@ function onRoomState(msg) {
   if (room.inMatch && !(prevRoom && prevRoom.inMatch && prevRoom.code === room.code)) store.set({ match: emptyMatch() });
   store.set({ room });
   identity.rememberMatch(room.inMatch && seats.some((seat) => seat?.playerId === myId)
-    ? { name: store.get().me.name, code: room.code || '' } : null);
+    ? { name: store.get().me.name, code: room.code || '', at: Date.now() } : null);
   if (room.mode === 'coop' && typeof room.code === 'string') rememberRoom(room.code);
   maybeFinishRestore();
 }

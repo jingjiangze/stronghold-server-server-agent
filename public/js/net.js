@@ -780,7 +780,10 @@ export function createIdentity(deps = {}) {
       const hash = tokenHash(token);
       const v = token === current ? info : old[hash];
       if (v && typeof v.name === 'string' && typeof v.code === 'string') {
-        next[hash] = { name: v.name.slice(0, 64), code: v.code.slice(0, 32) };
+        // `at` = when this record was last confirmed: the auto-resume path (shared/resumeTarget.mjs) only
+        // considers rooms remembered inside the server's reconnect window.
+        const at = Number.isFinite(v.at) ? v.at : null;
+        next[hash] = { name: v.name.slice(0, 64), code: v.code.slice(0, 32), at };
       }
     }
     sset(local, K_MATCHES, JSON.stringify(next));
@@ -893,7 +896,7 @@ export function createIdentity(deps = {}) {
       return readRecent().filter((token) => token !== current).flatMap((token) => {
         const hash = tokenHash(token), v = matches[hash];
         return v && typeof v.name === 'string' && typeof v.code === 'string'
-          ? [{ id: hash, name: v.name.slice(0, 64), code: v.code.slice(0, 32) }] : [];
+          ? [{ id: hash, name: v.name.slice(0, 64), code: v.code.slice(0, 32), at: Number.isFinite(v.at) ? v.at : null }] : [];
       });
     },
     /** Explicit recovery only. Recheck live claims immediately before selecting a saved seat. */
