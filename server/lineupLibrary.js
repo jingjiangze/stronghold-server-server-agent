@@ -108,26 +108,48 @@ function isDir(p) {
 }
 
 /**
- * The library file for `modeId`, or null (feature off). SP_LINEUP_LIBRARY names either:
- *   remote:<urls>|<cacheDir> → <cacheDir>/lineups_<modeId>.jsonl — a read-only remote synced here by
+ * The library key (file stem) for a mode + difficulty: `<modeId>__<DIFFICULTY>`.
+ *
+ * 玩法与难度各成一套库：`mode_single_hard__HARD.jsonl` 与 `mode_multi_hard__HARD.jsonl` 互不影响，
+ * 同一玩法下 `mode_single_hard__HARD` 与 `mode_single_normal__NORMAL` 也互不影响。分隔符是**双下划线**：
+ * modeId 自己含单下划线（`mode_single_hard`），单下划线会分不开模式与难度；双下划线在两侧字符集
+ * （`[A-Za-z0-9_]`）里不会自然出现，解析唯一。难度缺省（老的单文件布局）时退化为 modeId 本身。
+ * @param {string} [modeId] @param {string} [difficulty]
+ */
+export function libraryKey(modeId, difficulty) {
+  const mode = modeId || NO_MODE;
+  const diff = String(difficulty || '').trim().toUpperCase();
+  return diff ? `${mode}__${diff}` : mode;
+}
+
+/** Split a library key back into { modeId, difficulty } (difficulty null for the legacy per-mode shape). */
+export function splitLibraryKey(key) {
+  const m = /^([A-Za-z0-9_]+?)__([A-Z][A-Z0-9_]*)$/.exec(String(key || ''));
+  return m ? { modeId: m[1], difficulty: m[2] } : { modeId: String(key || ''), difficulty: null };
+}
+
+/**
+ * The library file for `modeId` + `difficulty`, or null (feature off). SP_LINEUP_LIBRARY names either:
+ *   remote:<urls>|<cacheDir> → <cacheDir>/lineups_<key>.jsonl — a read-only remote synced here by
  *                               server/lineupSync.js before the load (below); the path this returns is LOCAL,
  *                               so the synchronous read path never learns the difference;
- *   a directory  → <dir>/lineups_<modeId>.jsonl (created if missing) — the split layout, one file per mode;
- *   a file       → that file, whatever the mode — the single-file layout (modeId is then not part of the key).
+ *   a directory  → <dir>/lineups_<key>.jsonl (created if missing) — the split layout, one file per mode+difficulty;
+ *   a file       → that file, whatever the mode — the single-file layout (mode/difficulty are then not part of the key).
  * A path that does not exist and has no extension is treated as a directory. Parent directories are created, so a
  * fresh volume mount or a not-yet-created library directory just works.
- * @param {string} [modeId]
+ * @param {string} [modeId] @param {string} [difficulty]
  */
-export function lineupFile(modeId) {
+export function lineupFile(modeId, difficulty) {
   const raw = process.env.SP_LINEUP_LIBRARY;
   if (!raw || !raw.trim()) return null;
   const p = raw.trim();
+  const key = libraryKey(modeId, difficulty);
   // A remote spec short-circuits first: isDir/existsSync/extname below would treat a URI as a path and mkdirSync
   // would create a junk directory named after it. The cache dir is local, so only it is created here.
   const remote = remoteSpecOf(p);
-  const file = remote ? remoteCacheFile(remote.cacheDir, modeId)
-    : isDir(p) ? join(p, `${LIBRARY_PREFIX}${modeId || NO_MODE}.jsonl`)
-      : !existsSync(p) && !extname(p) ? join(p, `${LIBRARY_PREFIX}${modeId || NO_MODE}.jsonl`)
+  const file = remote ? remoteCacheFile(remote.cacheDir, key)
+    : isDir(p) ? join(p, `${LIBRARY_PREFIX}${key}.jsonl`)
+      : !existsSync(p) && !extname(p) ? join(p, `${LIBRARY_PREFIX}${key}.jsonl`)
         : p;
   try {
     const dir = dirname(resolve(file));
@@ -150,7 +172,7 @@ function remoteSpecOf(raw) {
 
 /** The library directory: where a deployment mounts / backs up / publishes. Null when the feature is off. */
 export function lineupDir() {
-  const probe = lineupFile(NO_MODE);
+  const probe = lineupFile(NO_MODE, null);
   if (!probe) return null;
   try {
     return dirname(resolve(probe));
@@ -175,7 +197,7 @@ export function lineupRemoteSpec() {
   return remoteSpecOf(raw.trim());
 }
 
-/** The configured modeIds that already have a file, for a publisher that walks the whole library. */
+/** The library keys (`<modeId>__<DIFFICULTY>` stems) that already have a file — what the publisher walks. */
 export function lineupModes() {
   const dir = lineupDir();
   if (!dir) return [];
@@ -273,8 +295,8 @@ function index(lib, rec) {
 }
 
 /** The library for `modeId` — one file per mode under a directory, one file for everything in the single-file layout. */
-function library(modeId) {
-  const file = lineupFile(modeId);
+function library(modeId, difficulty) {
+  const file = lineupFile(modeId, difficulty);
   if (!file) return null;
   if (!cache || cache.file !== file) cache = { file, modeId: modeId || NO_MODE, ...load(file) };
   return cache;
@@ -295,7 +317,7 @@ export function reloadLibrary() {
  * @param {import('./match/Match.js').Match} m
  */
 export function recordPrepLineups(m) {
-  if (!lineupFile(m.modeId)) return;
+  if (!lineupFile(m.modeId, m.difficulty)) return;
   try {
     for (const ps of m.alivePlayers()) {
       if (ps.botControlled) continue;
@@ -346,7 +368,7 @@ export function flushMatchLineups(m, outcome) {
   for (const rec of batch) {
     if (isFarm(rec)) continue; // a farm is not a player
     if (!validCells(rec.cells)) continue; // out-of-field or bad facing: corrupt, not a lineup
-    void appendLine(rec.modeId, rec);
+    void appendLine(rec.modeId, rec.difficulty, rec);
     queued.push(rec);
   }
   // The outbox mirror (方案 a，与 lineup-github-r2 会话的专用数据通道同一口径): the same gated batch
@@ -360,8 +382,8 @@ export function flushMatchLineups(m, outcome) {
   void m; // the match is the caller's anchor; the records carry their own stageId/difficulty/round
 }
 
-async function appendLine(modeId, rec) {
-  const lib = library(modeId);
+async function appendLine(modeId, difficulty, rec) {
+  const lib = library(modeId, difficulty);
   if (!lib) return;
   if (lib.seen.has(rec.sig)) return; // no duplicate lines for a lineup we already know
   lib.seen.add(rec.sig);
@@ -416,7 +438,7 @@ class Plan extends Map {
  * @returns {Array<Plan>} empty when the feature is off or nothing was recorded for this context
  */
 export function humanPlans(m, chosen) {
-  const lib = library(m.modeId);
+  const lib = library(m.modeId, m.difficulty);
   if (!lib) return [];
   const cellsList = lib.byKey.get(keyOf(m.modeId, m.stageId, m.difficulty, m.round));
   if (!cellsList || !cellsList.length) return [];

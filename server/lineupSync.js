@@ -41,8 +41,8 @@ export function parseRemoteSpec(raw) {
 }
 
 /** 本地缓存里某个 mode 的文件名（与 lineupLibrary 的分模式布局同前缀，便于人肉核对）。 */
-export function remoteCacheFile(cacheDir, modeId) {
-  return join(cacheDir.replace(/[\\/]+$/, ''), `lineups_${modeId || ''}.jsonl`);
+export function remoteCacheFile(cacheDir, key) {
+  return join(cacheDir.replace(/[\\/]+$/, ''), `lineups_${key || ''}.jsonl`);
 }
 
 /**
@@ -74,12 +74,12 @@ export async function fetchFirstText(urls, opts = {}) {
 }
 
 /**
- * 建同步器。`spec` 由 parseRemoteSpec 产出；`modes` 是「要同步哪些 mode」的探测函数
- * （通常就是 lineupLibrary.lineupModes()——远端已有哪些 mode 的清单，或者部署方显式列出）。
+ * 建同步器。`spec` 由 parseRemoteSpec 产出；`keys` 是「要同步哪些库」的列表
+ * （`<modeId>__<DIFFICULTY>`，见 lineupLibrary.libraryKey；部署方显式列出，或 lineupModes() 现读）。
  * 设计成注入而不是 import lineupLibrary：避免循环依赖，也让测试能只测这一层。
  */
 export function createLineupSync({
-  spec, modes = [], log = console, intervalMs = DEFAULT_INTERVAL_MS,
+  spec, keys = [], log = console, intervalMs = DEFAULT_INTERVAL_MS,
   fetchImpl = globalThis.fetch, now = () => Date.now(), timeoutMs = DEFAULT_TIMEOUT_MS,
 } = {}) {
   const state = { startedAt: null, lastTick: null, ticks: 0, pulls: 0, failures: 0, sources: {}, error: null };
@@ -88,25 +88,25 @@ export function createLineupSync({
   /** url → etag：只对「真的拿到过 200」的地址记，304 才有意义。 */
   const etags = new Map();
 
-  async function pullOne(modeId) {
-    const urls = spec.urls.map((base) => `${base.replace(/[\\/]+$/, '')}/lineups_${modeId || ''}.jsonl`);
-    const key = urls[0];
+  async function pullOne(key) {
+    const urls = spec.urls.map((base) => `${base.replace(/[\\/]+$/, '')}/lineups_${key || ''}.jsonl`);
+    const etagKey = urls[0];
     const { url, text, etag, notModified } = await fetchFirstText(urls, {
-      fetchImpl, timeoutMs, etag: etags.get(key) || null, log,
+      fetchImpl, timeoutMs, etag: etags.get(etagKey) || null, log,
     });
-    const dest = remoteCacheFile(spec.cacheDir, modeId);
+    const dest = remoteCacheFile(spec.cacheDir, key);
     if (notModified) {
-      state.sources[modeId] = { at: new Date().toISOString(), url, changed: false };
-      return { modeId, changed: false };
+      state.sources[key] = { at: new Date().toISOString(), url, changed: false };
+      return { key, changed: false };
     }
     // 先写 .partial 再改名：半途失败不会留下一个被 lineupLibrary 读到的残file
     await fsp.mkdir(spec.cacheDir, { recursive: true });
     await fsp.writeFile(dest + TMP_SUFFIX, text, 'utf8');
     await fsp.rename(dest + TMP_SUFFIX, dest);
-    if (etag) etags.set(key, etag);
-    state.sources[modeId] = { at: new Date().toISOString(), url, changed: true, bytes: Buffer.byteLength(text) };
+    if (etag) etags.set(etagKey, etag);
+    state.sources[key] = { at: new Date().toISOString(), url, changed: true, bytes: Buffer.byteLength(text) };
     state.pulls++;
-    return { modeId, changed: true };
+    return { key, changed: true };
   }
 
   async function tick() {
@@ -115,9 +115,9 @@ export function createLineupSync({
     state.ticks++;
     state.lastTick = new Date().toISOString();
     try {
-      const list = typeof modes === 'function' ? modes() : modes;
-      if (!list.length) throw new Error('no mode to sync — nothing to pull');
-      for (const modeId of list) await pullOne(modeId);
+      const list = typeof keys === 'function' ? keys() : keys;
+      if (!list.length) throw new Error('no library key to sync — nothing to pull');
+      for (const key of list) await pullOne(key);
       state.error = null;
       consecutiveFailures = 0;
     } catch (e) {
