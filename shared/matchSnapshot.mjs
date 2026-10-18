@@ -125,3 +125,71 @@ export function checkSnapshotSet(list, { expectedPlayers = [] } = {}) {
   for (const pid of expectedPlayers) if (!byPlayer.has(pid)) errors.push(`${pid}: 没有提交快照`);
   return { ok: errors.length === 0, snapshots: [...byPlayer.values()], errors };
 }
+
+// ---- 恢复包（魔搭等「容器重启即清盘」的部署）-------------------------------------------------------
+//
+// 魔搭创空间不给持久卷：任何服务端落盘（房间壳、seed）在容器重建后都不存在。能跨重启活下来的只有
+// **客户端本地存储**。所以恢复包的形态是：每个玩家各自存一份 { seed + 房间配置 + 自己的快照 }，
+// 重连后先到的人把包交给新进程，由新进程「以客户端携带的状态重建」。多份包必须互相一致（尤其 seed），
+// 不一致就不恢复——否则一个玩家可以挑一个对自己有利的 seed。
+
+/** 恢复包版本。 */
+export const BUNDLE_VERSION = 1;
+
+/**
+ * 校验一份客户端恢复包。
+ * @param {unknown} raw
+ * @returns {{ ok: true, bundle: object, dropped: string[], missing: string[] } | { ok: false, reason: string }}
+ */
+export function sanitizeBundle(raw) {
+  if (!raw || typeof raw !== 'object') return { ok: false, reason: '不是对象' };
+  if (raw.v !== BUNDLE_VERSION) return { ok: false, reason: `恢复包版本不认识（要 ${BUNDLE_VERSION}）` };
+  const seed = raw.seed;
+  if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) return { ok: false, reason: 'seed 必须是 uint32' };
+  const mode = clampStr(raw.mode, 16);
+  const difficulty = clampStr(raw.difficulty, 16);
+  const modeId = clampStr(raw.modeId, 64);
+  if (!mode || !difficulty || !modeId) return { ok: false, reason: '缺 mode / difficulty / modeId' };
+  const snap = sanitizeSnapshot(raw.snapshot);
+  if (!snap.ok) return { ok: false, reason: `快照无效：${snap.reason}` };
+  return {
+    ok: true,
+    bundle: { v: BUNDLE_VERSION, seed, mode, difficulty, modeId, snapshot: snap.snapshot },
+    dropped: snap.dropped,
+    missing: snap.missing,
+  };
+}
+
+/**
+ * 多份恢复包是否「说同一局」。seed / 房间 / 模式 / 难度 / modeId 全部一致才算同一局；
+ * 任何一项不一致都返回冲突清单（调用方据此放弃恢复、当新局处理）。
+ * @param {unknown[]} list
+ * @returns {{ ok: boolean, meta: object | null, snapshots: object[], conflicts: string[], errors: string[] }}
+ */
+export function agreeOnBundles(list) {
+  const errors = [];
+  const good = [];
+  for (const item of Array.isArray(list) ? list : []) {
+    const res = sanitizeBundle(item);
+    if (!res.ok) { errors.push(res.reason); continue; }
+    good.push(res.bundle);
+  }
+  if (!good.length) return { ok: false, meta: null, snapshots: [], conflicts: ['没有有效恢复包'], errors };
+  const first = good[0];
+  const conflicts = [];
+  const fields = ['seed', 'mode', 'difficulty', 'modeId'];
+  for (const b of good.slice(1)) {
+    for (const f of fields) if (b[f] !== first[f]) conflicts.push(`${f}: ${first[f]} ≠ ${b[f]}`);
+  }
+  // 房间码由快照带（每份快照都有），也要一致
+  for (const b of good.slice(1)) {
+    if (b.snapshot.roomCode !== first.snapshot.roomCode) conflicts.push(`roomCode: ${first.snapshot.roomCode} ≠ ${b.snapshot.roomCode}`);
+  }
+  return {
+    ok: conflicts.length === 0,
+    meta: conflicts.length ? null : { seed: first.seed, mode: first.mode, difficulty: first.difficulty, modeId: first.modeId, roomCode: first.snapshot.roomCode },
+    snapshots: good.map((b) => b.snapshot),
+    conflicts,
+    errors,
+  };
+}
