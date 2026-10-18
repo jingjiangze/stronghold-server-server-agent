@@ -30,6 +30,8 @@ jobs:
       SP_REAL_E2E: '0'
       RENDER_E2E: '0'
       NO_COLOR: '1'
+      # the lineup library defaults to local (record + upload); tests must not write into the checkout
+      SP_LINEUP_MODE: 'off'
     steps:
       - uses: actions/checkout@v7
 

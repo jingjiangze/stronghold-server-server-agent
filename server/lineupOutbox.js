@@ -29,6 +29,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;
+/** 结算后立即补传的合并窗口：一局刚结束、同一进程里可能连着几局，3 秒内的多次请求只跑一趟。 */
+const FLUSH_DEBOUNCE_MS = 3000;
 /** outbox 自身上限：独立于学习库的 3 MiB 窗口——补传长期失败时丢最旧的增量，保住最新的教学数据。 */
 const MAX_OUTBOX_LINES = 8000;
 const TMP_SUFFIX = '.partial';
@@ -95,9 +97,10 @@ export async function trimOutbox(file) {
  */
 export function createLineupOutbox({
   dir, publish, log = console, intervalMs = DEFAULT_INTERVAL_MS, now = () => Date.now(),
+  flushDebounceMs = FLUSH_DEBOUNCE_MS,
 } = {}) {
   const state = { startedAt: null, lastTick: null, ticks: 0, sent: 0, failures: 0, error: null, pending: 0 };
-  let timer = null, busy = false, backoffUntil = 0, consecutiveFailures = 0;
+  let timer = null, flushTimer = null, busy = false, backoffUntil = 0, consecutiveFailures = 0;
   const file = join(dir, OUTBOX_NAME);
 
   async function readPending() {
@@ -180,7 +183,17 @@ export function createLineupOutbox({
       timer = setInterval(tick, intervalMs);
       if (timer.unref) timer.unref();
     },
-    stop() { if (timer) { clearInterval(timer); timer = null; } },
+    stop() { if (timer) { clearInterval(timer); timer = null; } if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; } },
+
+    /**
+     * 立即补传（结算后调用）：合并 FLUSH_DEBOUNCE_MS 内的多次请求，避免一局刚结束就连发多批。
+     * 与定时器共用同一个 tick，busy/退避照旧；失败不抛、留给下一轮。
+     */
+    requestFlush() {
+      if (flushTimer) return;
+      flushTimer = setTimeout(() => { flushTimer = null; void tick(); }, flushDebounceMs);
+      if (flushTimer.unref) flushTimer.unref();
+    },
     /** 立刻补传一次（可 await：诊断/测试用）。 */
     syncOnce: tick,
     state: () => ({ ...state, intervalMs, file }),
