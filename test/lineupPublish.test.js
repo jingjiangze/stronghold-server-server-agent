@@ -126,10 +126,11 @@ test('the whole chain runs for real against a local CDN stand-in: begin → pres
       assert.equal(out.skipped, 1);
       assert.equal(out.failed, 0);
       const keys = out.files.filter((f) => f.ok && f.key).map((f) => f.key).sort();
-      assert.deepEqual(keys, [
-        'packs/lineup-library/mode_multi_hard-2026-10-17.jsonl',
-        'packs/lineup-library/mode_single_hard-2026-10-17.jsonl',
-      ], 'keys are per-mode and dated');
+      // The key carries today's UTC date (dayStamp), so assert the shape, not a literal date: a hardcoded day
+      // turns this green test red at the first UTC midnight after it was written.
+      assert.equal(keys.length, 2);
+      assert.match(keys[0], /^packs\/lineup-library\/mode_multi_hard-\d{4}-\d{2}-\d{2}\.jsonl$/);
+      assert.match(keys[1], /^packs\/lineup-library\/mode_single_hard-\d{4}-\d{2}-\d{2}\.jsonl$/);
       // begin carried the real size and a computed sha256, and named the source group
       assert.equal(seen.begins.length, 2);
       for (const b of seen.begins) {
@@ -201,7 +202,8 @@ test('files the publisher must never touch are ignored (only lineups_*.jsonl mat
     await withCdn({}, async ({ base, seen }) => {
       const out = await publishLibrary({ dir, base, env: { CDN_ADMIN_KEY: 'k' }, log: { warn() {}, info() {} } });
       assert.equal(out.ok, 1);
-      assert.deepEqual(seen.begins.map((b) => b.key), ['packs/lineup-library/ok-2026-10-17.jsonl'], 'only the library file is offered');
+      assert.equal(seen.begins.length, 1, 'only the library file is offered');
+      assert.match(seen.begins[0].key, /^packs\/lineup-library\/ok-\d{4}-\d{2}-\d{2}\.jsonl$/);
       assert.ok(!seen.begins.some((b) => String(b.key).includes('notes')), 'the operator file is never uploaded');
       assert.equal(seen.puts.length, 1);
     });
