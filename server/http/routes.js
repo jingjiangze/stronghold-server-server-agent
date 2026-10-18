@@ -56,7 +56,7 @@ const wantsTraffic = (query) => /(?:^|&)traffic(?:=(?:1|true|yes))?(?:&|$)/i.tes
  *   trustProxy: whose forwarding headers name the client (net.js clientAddress; the server's TRUST_PROXY)
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void}
  */
-export function createRequestHandler({ serveStatic, health, log, trustProxy = 'auto' }) {
+export function createRequestHandler({ serveStatic, health, log, trustProxy = 'auto', platformStatus = null }) {
   async function handleRequest(req, res) {
     const url = req.url || '/';
     if (url.length > MAX_URL_LENGTH) { sendError(req, res, 414, '请求地址过长 · URI too long'); return; }
@@ -65,6 +65,11 @@ export function createRequestHandler({ serveStatic, health, log, trustProxy = 'a
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
+      return;
+    }
+    if (parts.rawPath === '/api/platform') {
+      // Diagnostics only (server/platform.js): the mode the handshake platform link runs in and its counters.
+      sendJson(req, res, 200, platformStatus ? platformStatus() : { enabled: false });
       return;
     }
     if (parts.rawPath === '/healthz') {

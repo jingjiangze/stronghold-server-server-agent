@@ -120,6 +120,9 @@ npm start          # 启动服务器：http://localhost:3000
 | `SP_LINEUP_LIBRARY` | 空 | 设为一个 JSONL 文件路径即开启「AI 学习真人布阵」：每次整备结束把**真人**的最终布阵（含朝向）追加记录到该文件；AI 队友整备时会检索同关卡 / 同难度 / 同回合记录到的真人布阵，映射到自己抽到的干员后作为额外候选交给布阵试算模拟择优——只有模拟打得赢现有候选才会被选中，因此学习只会变强不会变弱；试算候选数仍受数量上限约束，CPU 开销不随记录增长。不设置则完全不记录、不学习，行为与默认完全一致 |
 | `SP_LINEUP_OUTBOX` | 开 | 增量补传队列（`<库目录>/outbox.jsonl`）：每局结算的真人布阵先落本地库、同时入队；定时器把积压按模式发成 `packs/lineup-library/<模式>-<日期>.jsonl`（与发布走同一条专用数据通道、同一口令口径 `CDN_ADMIN_KEY`），**发布成功（含同日键已存在的 409）才删行**——断网期间积压、恢复后自动续传。设为 `0` 关闭（不建队列、不入队；本地库不受影响）。没有口令时记录照常积压、不发请求 |
 | `SP_LINEUP_OUTBOX_MS` | `900000` | 补传间隔（毫秒，默认 15 分钟）；失败按指数退避（上限 1 小时），绝不影响对局 |
+| `SP_PLATFORM_URL` | `https://p2p.jiangjiangze.icu` | openp2p 握手平台基址（`0` / `off` 关闭）。**只在设了 `SP_PLATFORM_HOSTNODE` 或 `SP_PLATFORM_UPSTREAM` 时生效**：房主开房后服务端 POST `/api/room` 登记，平台把返回的 `joinUrl` 作为 `room.state.inviteUrl` 广播给房间。平台只回一条 302，游戏流量不经它 |
+| `SP_PLATFORM_HOSTNODE` | 空 | 房主机器的 openp2p 节点名（8–63 位 `[A-Za-z0-9._-]`）。设了就是 **p2p 优先**：玩家经隧道直连房主；打不穿时平台回退到 `SP_PLATFORM_UPSTREAM` |
+| `SP_PLATFORM_UPSTREAM` | ModelScope 注入的 `STUDIO_HOST` / `SPACE_HOST` | 回退目标（公网游戏服务器 origin）。不设 hostNode 时它是本服务器自己的公网地址 ⇒ **direct 形态**（纯 302）。登记失败不影响开房：`inviteUrl` 保持 null，房间照常用本机邀请链接 |
 | `TRUST_PROXY` | `auto` | 是否信任 `X-Forwarded-For` 等转发头：`auto` 只信任来自本机 / 内网的代理；`1` 总是；`0` 从不 |
 | `DEBUG` | 空 | 设为任意值输出详细日志 |
 | `SP_NO_BROWSER` | 空 | 设为 `1` 时启动脚本不自动打开浏览器 |

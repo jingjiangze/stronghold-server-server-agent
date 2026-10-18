@@ -210,6 +210,13 @@ export class Room {
      * @type {boolean}
      */
     this.frozen = false;
+    /**
+     * The handshake platform's invite link for this room (server/platform.js), or null when the install has no
+     * platform configured / the registration failed. Purely presentational: it never gates joining, which is
+     * still `room.join` with this room's own code.
+     * @type {string | null}
+     */
+    this.inviteUrl = null;
   }
 
   /** @param {string} playerId @returns {Seat | null} */
@@ -244,6 +251,8 @@ export class Room {
       mode: this.mode,
       difficulty: this.difficulty,
       aiPicksLast: this.aiPicksLast,
+      // the handshake platform's join link (server/platform.js), when the room has one; null otherwise. Display-only
+      inviteUrl: this.inviteUrl,
       inMatch: !!this.match,
       seats: this.seats.map((s) => (s
         ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left }
@@ -282,6 +291,13 @@ export class Lobby {
     this.resyncTimers = new Map();
     /** per-network limit warnings: at most one log line per 10 s (the rest are counted) */
     this.limitLog = { at: -Infinity, suppressed: 0 };
+    /**
+     * The openp2p handshake platform this lobby announces its rooms to (server/platform.js): `{ register, release }`,
+     * or null when the install has none configured. It only ever produces room.state.inviteUrl.
+     * @type {{ register: (code: string) => Promise<{ roomId: string, joinUrl: string } | null>,
+     *          release: (code: string) => void } | null}
+     */
+    this.platform = null;
   }
 
   /** @param {string} code @returns {Room | null} */
@@ -455,7 +471,27 @@ export class Lobby {
     session.pendingResult = null;
     this.log.info(`[lobby] ${code} created (${mode}/${difficulty}) by ${session.name}`);
     this.broadcastState(room);
+    this.announcePlatformRoom(room);
     return OK;
+  }
+
+  /**
+   * Ask the handshake platform for this room's join link (server/platform.js). Fire-and-forget by design: a failure
+   * leaves room.inviteUrl null and the room keeps working with the local invite link the web client builds itself.
+   * A solo room has nobody to invite.
+   * @param {Room} room
+   */
+  announcePlatformRoom(room) {
+    const platform = this.platform;
+    if (!platform || room.mode === 'solo') return;
+    Promise.resolve()
+      .then(() => platform.register(room.code))
+      .then((res) => {
+        if (!res || !res.joinUrl || room.disposed) return;
+        room.inviteUrl = res.joinUrl;
+        this.broadcastState(room);
+      })
+      .catch((e) => this.log.warn?.(`[platform] ${room.code} registration failed: ${e?.message || e}`));
   }
 
   join(session, { code }) {
@@ -1185,6 +1221,7 @@ export class Lobby {
     room.disposed = true;
     room.frozen = false;
     if (this.rooms.get(room.code) === room) this.rooms.delete(room.code);
+    this.platform?.release(room.code);
     const ctx = room.matchCtx;
     room.match = null;
     room.matchCtx = null;

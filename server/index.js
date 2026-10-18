@@ -44,6 +44,7 @@ import { createUpstreamWatch } from './upstreamWatch.js';
 import { createLineupSync } from './lineupSync.js';
 import { publishLibrary, publishOneMode } from './lineupPublish.js';
 import { createLineupOutbox, outboxEnabled } from './lineupOutbox.js';
+import { platformConfigFromEnv, createPlatformLink, PLATFORM_DISABLED } from './platform.js';
 import { lineupRemoteSpec, reloadLibrary, lineupDir } from './lineupLibrary.js';
 
 /** Modes a remote lineup library is pulled for (data/config.json's mode ids). SP_LINEUP_SYNC_MODES overrides. */
@@ -167,6 +168,15 @@ export async function startServer(opts = {}) {
   buildTag();
 
   const traffic = createTrafficCounter();
+  // The openp2p handshake platform (server/platform.js): off unless SP_PLATFORM_* is configured. Rooms publish
+  // their join link through room.state; the platform answers one 302 and never carries gameplay, so an
+  // unreachable platform can only cost a room its remote link — never the room itself.
+  const platformConfig = platformConfigFromEnv(process.env);
+  const platform = platformConfig ? createPlatformLink(platformConfig, { log }) : null;
+  if (platform) {
+    lobby.platform = platform;
+    log.info?.(`[platform] ${platform.mode} invite links via ${platform.base}${platform.upstream ? ` (fallback ${platform.upstream})` : ''}`);
+  }
   // The outbox uploader (方案 a，与 lineupPublish 同一发布通道): lineups queued by flushMatchLineups ride the
   // dedicated data channel (begin → PUT → commit, dated keys) on a timer; offline they accumulate and resume.
   // "Already published" (409, same-day key) counts as confirmed. Off without credentials — publishOneMode
@@ -180,7 +190,9 @@ export async function startServer(opts = {}) {
     })
     : null;
   if (lineupOutbox) lineupOutbox.start();
-  const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, traffic, assetIndex, views, getHealthMetrics: () => healthMetrics }, log, trustProxy: network.opts.trustProxy }));
+  const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, traffic, assetIndex, views, getHealthMetrics: () => healthMetrics }, log, trustProxy: network.opts.trustProxy,
+    // Diagnostics only: which mode the platform link runs in and how many rooms are registered there.
+    platformStatus: () => (platform ? platform.status() : PLATFORM_DISABLED) }));
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log, traffic });
 

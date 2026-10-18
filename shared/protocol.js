@@ -482,6 +482,8 @@ export const C2S = {
 export const S2C = [
   'welcome', 'ok', 'error', 'pong',
   'room.state', 'room.closed',
+  // room.state.inviteUrl is optional (string | null): the handshake platform's join link for this room when the
+  // server is configured with one (server/platform.js). Display-only — joining is still room.join with the code.
   'm.public', 'm.private', 'm.field', 'm.toast', 'm.ticker', 'm.emote', 'm.result',
   // m.layer { playerId, bondId, add } — own live prep layer gain; ephemeral, never replayed on resync.
   'm.layer',
