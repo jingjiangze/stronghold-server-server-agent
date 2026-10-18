@@ -31,7 +31,7 @@ test('a remote library resolves to a LOCAL cache path, never to the URI', () => 
   process.env.SP_LINEUP_LIBRARY = `remote:https://ghfast.example/owner/repo/main|${join(dir, 'cache')}`;
   try {
     assert.equal(lineupRemoteSpec().cacheDir, join(dir, 'cache'));
-    assert.equal(lineupFile('mode_single_hard'), join(dir, 'cache', 'lineups_mode_single_hard.jsonl'));
+    assert.equal(lineupFile('mode_single_hard', 'HARD'), join(dir, 'cache', 'lineups_mode_single_hard__HARD.jsonl'));
     // the URI must never be handed to the filesystem: no junk directory named after it
     assert.ok(!existsSync(join(dir, 'cache', 'https:')) && !existsSync('https:'), 'no directory created from the URI');
     assert.equal(lineupDir(), join(dir, 'cache'));
@@ -78,9 +78,9 @@ test('the syncer writes the pulled bytes atomically and a second pull with the s
   };
   try {
     const spec = { urls: ['https://ok.example/lib'], cacheDir };
-    const sync = createLineupSync({ spec, modes: ['mode_single_hard'], fetchImpl, log: { warn() {} } });
+    const sync = createLineupSync({ spec, keys: ['mode_single_hard__HARD'], fetchImpl, log: { warn() {} } });
     await sync.syncOnce();
-    const dest = remoteCacheFile(cacheDir, 'mode_single_hard');
+    const dest = remoteCacheFile(cacheDir, 'mode_single_hard__HARD');
     assert.ok(existsSync(dest), 'the pulled bytes are on disk');
     assert.equal(readFileSync(dest, 'utf8'), line(twoCells()) + '\n');
     assert.equal(sync.state().pulls, 1);
@@ -92,7 +92,7 @@ test('the syncer writes the pulled bytes atomically and a second pull with the s
       assert.equal(opts.headers['if-none-match'], '"e1"', 'the remembered etag is sent back');
       return { ok: false, status: 304, headers: { get: () => null } };
     };
-    const second = createLineupSync({ spec, modes: ['mode_single_hard'], fetchImpl: etagFetch, log: { warn() {} } });
+    const second = createLineupSync({ spec, keys: ['mode_single_hard__HARD'], fetchImpl: etagFetch, log: { warn() {} } });
     await second.syncOnce();
     assert.equal(second.state().pulls, 0, 'an unchanged remote is not re-written');
     assert.equal(readFileSync(dest, 'utf8'), line(twoCells()) + '\n', 'the cache is untouched');
@@ -110,7 +110,7 @@ test('a remote that cannot be reached only logs and backs off — nothing is wri
   let attempts = 0;
   try {
     const sync = createLineupSync({
-      spec: { urls: ['https://down.example/lib'], cacheDir }, modes: ['mode_single_hard'],
+      spec: { urls: ['https://down.example/lib'], cacheDir }, keys: ['mode_single_hard__HARD'],
       fetchImpl: async () => { attempts++; throw new Error('ECONNRESET'); },
       log: { warn: (m) => warnings.push(m) },
       now: () => clock,
@@ -144,7 +144,7 @@ test('a pulled remote library is read back through the normal local path', async
   process.env.SP_LINEUP_LIBRARY = `remote:https://ok.example/lib|${cacheDir}`;
   try {
     const sync = createLineupSync({
-      spec: { urls: ['https://ok.example/lib'], cacheDir }, modes: ['mode_single_hard'],
+      spec: { urls: ['https://ok.example/lib'], cacheDir }, keys: ['mode_single_hard__HARD'],
       fetchImpl: async () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => line(twoCells()) + '\n' }),
       log: { warn() {} },
     });

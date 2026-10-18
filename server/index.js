@@ -47,8 +47,12 @@ import { createLineupOutbox, outboxEnabled } from './lineupOutbox.js';
 import { platformConfigFromEnv, createPlatformLink, PLATFORM_DISABLED } from './platform.js';
 import { lineupRemoteSpec, reloadLibrary, lineupDir } from './lineupLibrary.js';
 
-/** Modes a remote lineup library is pulled for (data/config.json's mode ids). SP_LINEUP_SYNC_MODES overrides. */
-const DEFAULT_SYNC_MODES = 'mode_single_normal,mode_single_hard,mode_single_abyss,mode_multi_normal,mode_multi_hard,mode_multi_abyss';
+/**
+ * The libraries a remote lineup library is pulled for: `<modeId>__<DIFFICULTY>` (lineupLibrary.libraryKey).
+ * SP_LINEUP_SYNC_KEYS overrides (the old SP_LINEUP_SYNC_MODES name still works for a bare modeId).
+ */
+const DEFAULT_SYNC_KEYS = 'mode_single_normal__NORMAL,mode_single_hard__HARD,mode_single_abyss__ABYSS,'
+  + 'mode_multi_normal__NORMAL,mode_multi_hard__HARD,mode_multi_abyss__ABYSS';
 /** How often a local library is published to the CDN (daily: the content changes slowly and the keys are dated). */
 const LINEUP_PUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /**
@@ -138,7 +142,8 @@ export async function startServer(opts = {}) {
       intervalMs: Number(process.env.SP_LINEUP_SYNC_MS || 0) || undefined,
       // Which modes to pull. A fresh cache is empty, so this cannot be discovered locally: it is a deploy-time list
       // (the remote's own inventory), defaulting to the modes data/config.json ships.
-      modes: () => (process.env.SP_LINEUP_SYNC_MODES || DEFAULT_SYNC_MODES).split(',').map((s) => s.trim()).filter(Boolean),
+      keys: () => (process.env.SP_LINEUP_SYNC_KEYS || process.env.SP_LINEUP_SYNC_MODES || DEFAULT_SYNC_KEYS)
+        .split(',').map((s) => s.trim()).filter(Boolean),
     })
     : null;
   if (lineupSync) {
@@ -185,7 +190,7 @@ export async function startServer(opts = {}) {
   const lineupOutbox = outboxEnabled() && !lineupSpec && lineupDir()
     ? createLineupOutbox({
       dir: lineupDir(), log,
-      publish: ({ modeId, records }) => publishOneMode({ modeId, records, log, env: process.env }),
+      publish: ({ key, records }) => publishOneMode({ key, records, log, env: process.env }),
       intervalMs: Number(process.env.SP_LINEUP_OUTBOX_MS || 0) || undefined,
     })
     : null;

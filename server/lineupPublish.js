@@ -179,8 +179,8 @@ async function uploadOne(abs, targetKey, source, what, base, key, fetchImpl) {
 }
 
 /**
- * 发布一个模式的**增量记录**（outbox 通道用）：把调用方攒好的一批 lineup 记录写进当日键
- * `packs/lineup-library/<modeId>-<YYYY-MM-DD>.jsonl`，走与 publishLibrary 完全相同的
+ * 发布一个库（`<modeId>__<DIFFICULTY>`）的**增量记录**（outbox 通道用）：把调用方攒好的一批
+ * lineup 记录写进当日键 `packs/lineup-library/<key>-<YYYY-MM-DD>.jsonl`，走与 publishLibrary 完全相同的
  * begin → presigned PUT → commit 链。
  *
  * 「只增不改」在这里是有用的语义：同一天对同一模式的第二次发布会 409，publishOne 把它报成
@@ -192,10 +192,10 @@ async function uploadOne(abs, targetKey, source, what, base, key, fetchImpl) {
  * @returns {Promise<{ok: boolean, status: number, key: string, reason?: string}>} 绝不抛。
  */
 export async function publishOneMode({
-  modeId, records, base = DEFAULT_BASE, source = DEFAULT_SOURCE, now = new Date(),
+  key: libraryKey, records, base = DEFAULT_BASE, source = DEFAULT_SOURCE, now = new Date(),
   log = console, env = process.env, home = os.homedir(), fetchImpl,
 } = {}) {
-  const out = { ok: false, status: 0, key: `${KEY_PREFIX}${modeId || ''}-${dayStamp(now)}.jsonl`, reason: null };
+  const out = { ok: false, status: 0, key: `${KEY_PREFIX}${libraryKey || ''}-${dayStamp(now)}.jsonl`, reason: null };
   const key = adminKey(env, home);
   if (!key) { out.reason = '没有上传口令（CDN_ADMIN_KEY 或 ~/.cdn_admin_key）'; log.warn?.(`[lineup-publish] ${out.reason}`); return out; }
   if (!Array.isArray(records) || !records.length) { out.reason = '没有可发布的记录'; return out; }
@@ -206,12 +206,12 @@ export async function publishOneMode({
     const stat = fs.statSync(tmp);
     const gate = publishableFile(tmp, stat);
     if (!gate.ok) { out.reason = `批次被门拒绝：${gate.reason}`; return out; }
-    const res = await uploadOne(tmp, out.key, source, `lineup outbox for ${modeId || '(no mode)'}`, base, key, fetchImpl);
+    const res = await uploadOne(tmp, out.key, source, `lineup outbox for ${libraryKey || '(no key)'}`, base, key, fetchImpl);
     out.ok = res.ok; out.status = res.status; out.reason = res.reason || null;
-    log.info?.(`[lineup-publish] outbox ${modeId || '(no mode)'} → ${out.key} ${res.ok ? 'ok' : 'FAIL'} ${res.reason || ''}`.trim());
+    log.info?.(`[lineup-publish] outbox ${libraryKey || '(no key)'} → ${out.key} ${res.ok ? 'ok' : 'FAIL'} ${res.reason || ''}`.trim());
   } catch (e) {
     out.reason = String((e && e.message) || e);
-    log.warn?.(`[lineup-publish] outbox ${modeId || '(no mode)'} 异常：${out.reason}`);
+    log.warn?.(`[lineup-publish] outbox ${libraryKey || '(no key)'} 异常：${out.reason}`);
   } finally {
     try { fs.unlinkSync(tmp); } catch { /* 临时文件删不掉不影响结果 */ }
   }
