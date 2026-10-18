@@ -39,7 +39,7 @@ test('a remote library resolves to a LOCAL cache path, never to the URI', () => 
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -98,7 +98,7 @@ test('the syncer writes the pulled bytes atomically and a second pull with the s
     assert.equal(readFileSync(dest, 'utf8'), line(twoCells()) + '\n', 'the cache is untouched');
     assert.equal(served, 1, 'the first pull was the only full download');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -133,7 +133,7 @@ test('a remote that cannot be reached only logs and backs off — nothing is wri
     assert.equal(sync.state().failures, 2);
     assert.ok(!existsSync(cacheDir), 'and still nothing written');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -160,6 +160,6 @@ test('a pulled remote library is read back through the normal local path', async
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
