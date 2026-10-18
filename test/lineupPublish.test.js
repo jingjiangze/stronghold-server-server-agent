@@ -220,9 +220,9 @@ test('publishOneMode: a batch of records goes up the same chain under the mode\'
       { t: 'lineup', at: '2026-10-18T00:00:00Z', modeId: 'mode_single_hard', stageId: 's', difficulty: 'HARD', round: 3, sig: 'x', cells: [cells('a', 9, 3), cells('b', 9, 4)] },
       { t: 'lineup', at: '2026-10-18T00:00:01Z', modeId: 'mode_single_hard', stageId: 's', difficulty: 'HARD', round: 4, sig: 'y', cells: [cells('c', 9, 5), cells('d', 9, 6)] },
     ];
-    const out = await publishOneMode({ modeId: 'mode_single_hard', records, base, env: { CDN_ADMIN_KEY: 'k' }, log: { warn() {}, info() {} } });
+    const out = await publishOneMode({ key: 'mode_single_hard__HARD', records, base, env: { CDN_ADMIN_KEY: 'k' }, log: { warn() {}, info() {} } });
     assert.equal(out.ok, true);
-    assert.match(out.key, /^packs\/lineup-library\/mode_single_hard-\d{4}-\d{2}-\d{2}\.jsonl$/);
+    assert.match(out.key, /^packs\/lineup-library\/mode_single_hard__HARD-\d{4}-\d{2}-\d{2}\.jsonl$/);
     assert.equal(seen.begins.length, 1);
     assert.equal(seen.puts.length, 1);
     const body = seen.puts[0].bytes.toString('utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -247,10 +247,10 @@ test('publishOneMode: 409 (same-day key exists) is reported ok — the dated key
 test('publishOneMode: no key and empty records are clean non-ok answers, never throws', async () => {
   const emptyHome = mkdtempSync(join(tmpdir(), 'lineup-pub-home-'));
   try {
-    const noKey = await publishOneMode({ modeId: 'm', records: [{}], env: {}, home: emptyHome, log: { warn() {}, info() {} } });
+    const noKey = await publishOneMode({ key: 'm__HARD', records: [{}], env: {}, home: emptyHome, log: { warn() {}, info() {} } });
     assert.equal(noKey.ok, false);
     assert.match(noKey.reason, /口令/);
-    const empty = await publishOneMode({ modeId: 'm', records: [], env: { CDN_ADMIN_KEY: 'k' }, log: { warn() {}, info() {} } });
+    const empty = await publishOneMode({ key: 'm__HARD', records: [], env: { CDN_ADMIN_KEY: 'k' }, log: { warn() {}, info() {} } });
     assert.equal(empty.ok, false);
     assert.match(empty.reason, /没有可发布/);
   } finally {

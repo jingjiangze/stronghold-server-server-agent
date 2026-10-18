@@ -190,22 +190,23 @@ test('a library past the byte cap is rolled on the next append too', async () =>
   }
 });
 
-test('SP_LINEUP_LIBRARY may name a DIRECTORY: the library becomes one file per mode', async () => {
+test('SP_LINEUP_LIBRARY may name a DIRECTORY: the library becomes one file per mode+difficulty', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'lineup-lib-'));
   const libDir = join(dir, 'library'); // does not exist yet — a fresh volume mount
   const old = process.env.SP_LINEUP_LIBRARY;
   process.env.SP_LINEUP_LIBRARY = libDir;
   try {
-    assert.equal(lineupFile('coop'), join(libDir, 'lineups_coop.jsonl'), 'a directory resolves to one file per mode');
-    assert.equal(lineupFile('single_hard'), join(libDir, 'lineups_single_hard.jsonl'));
+    assert.equal(lineupFile('coop', 'HARD'), join(libDir, 'lineups_coop__HARD.jsonl'), 'a directory resolves to one file per mode+difficulty');
+    assert.equal(lineupFile('coop', 'NORMAL'), join(libDir, 'lineups_coop__NORMAL.jsonl'), 'the difficulty is part of the file');
+    assert.equal(lineupFile('single_hard', 'HARD'), join(libDir, 'lineups_single_hard__HARD.jsonl'));
     assert.equal(lineupDir(), libDir);
     const m = fakeMatch({ seats: [{ bot: false, board: board([['9,3', 'char_a', 'UP'], ['9,4', 'char_b', 'LEFT']]) }] });
     recordPrepLineups(m);
-    assert.ok(!existsSync(lineupFile('coop')), 'staging alone writes nothing');
+    assert.ok(!existsSync(lineupFile('coop', 'HARD')), 'staging alone writes nothing');
     flushMatchLineups(m);
     await new Promise((r) => setTimeout(r, 30));
-    assert.ok(existsSync(join(libDir, 'lineups_coop.jsonl')), 'the directory was created and holds this mode file');
-    assert.deepEqual(lineupModes(), ['coop'], 'the publisher can enumerate the modes that have a file');
+    assert.ok(existsSync(join(libDir, 'lineups_coop__HARD.jsonl')), 'the directory was created and holds this mode+difficulty file');
+    assert.deepEqual(lineupModes(), ['coop__HARD'], 'the publisher can enumerate the library keys that have a file');
     // and the same directory can be read back by a later process (the load path resolves it identically)
     const plans = humanPlans(fakeMatch(), [{ uid: 'u1', id: 'char_a' }, { uid: 'u2', id: 'char_b' }]);
     assert.equal(plans.length, 1);
@@ -233,18 +234,18 @@ test('a directory keeps every mode in its own file and its own key space', async
     recordPrepLineups(single);
     flushMatchLineups(single);
     await new Promise((r) => setTimeout(r, 30));
-    const read = (mode) => readFileSync(join(libDir, `lineups_${mode}.jsonl`), 'utf8').trim().split('\n');
-    assert.equal(read('coop').length, 1, 'one file per mode');
-    assert.equal(read('single_hard').length, 1);
-    assert.equal(JSON.parse(read('coop')[0]).modeId, 'coop');
-    assert.equal(JSON.parse(read('single_hard')[0]).stageId, 'act2_m03');
+    const read = (key) => readFileSync(join(libDir, `lineups_${key}.jsonl`), 'utf8').trim().split('\n');
+    assert.equal(read('coop__HARD').length, 1, 'one file per mode+difficulty');
+    assert.equal(read('single_hard__HARD').length, 1);
+    assert.equal(JSON.parse(read('coop__HARD')[0]).modeId, 'coop');
+    assert.equal(JSON.parse(read('single_hard__HARD')[0]).stageId, 'act2_m03');
     // the same pieces and stage under another mode are a different key: no cross-talk either way
     const chosen = [{ uid: 'u1', id: 'char_a' }, { uid: 'u2', id: 'char_b' }];
     assert.equal(humanPlans(coop, chosen).length, 1, 'coop keeps its own lineup');
     assert.equal(humanPlans(fakeMatch({ modeId: 'single_hard', stageId: 'act2_m03' }), chosen).length, 1);
     assert.equal(humanPlans(fakeMatch({ modeId: 'single_hard' }), chosen).length, 0, 'another mode does not borrow it');
     assert.equal(humanPlans(fakeMatch({ modeId: 'multi_hard', stageId: 'act1_m01' }), chosen).length, 0);
-    assert.deepEqual(lineupModes(), ['coop', 'single_hard']);
+    assert.deepEqual(lineupModes(), ['coop__HARD', 'single_hard__HARD']);
   } finally {
     if (old !== undefined) process.env.SP_LINEUP_LIBRARY = old;
     else delete process.env.SP_LINEUP_LIBRARY;

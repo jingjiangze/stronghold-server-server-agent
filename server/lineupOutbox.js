@@ -3,7 +3,7 @@
 // 为什么是 outbox 而不是直接 POST：p2p 联机里游戏服务器跑在房主自己的机器上，网络随时断（隧道抖动、
 // 笔记本合盖、拨号重连）。一场对局结算（flushMatchLineups）在本地落库的同时把同批记录追加进
 // outbox 文件；之后定时器把积压**经 lineupPublish 的上传链**发成
-// packs/lineup-library/<modeId>-<YYYY-MM-DD>.jsonl，确认（2xx）才删行。
+// packs/lineup-library/<modeId>__<DIFFICULTY>-<YYYY-MM-DD>.jsonl，确认（2xx）才删行。
 // 断线期间积压、上线后自动续传——这就是「优先到本地（缓存），连不上服务器则下次」。
 //
 // 日期键的语义（与 Phase 7 的专用通道一致）：上传键只增不改，同一天对同一模式第二次发布必然 409。
@@ -122,14 +122,14 @@ export function createLineupOutbox({
       const lines = await readPending();
       state.pending = lines.length;
       if (!lines.length) { state.error = null; consecutiveFailures = 0; return; }
-      // 按模式分组（发布键以 modeId 为粒度），每组的记录组装成一批发给注入的 publish。
+      // 按「玩法 + 难度」分组（发布键以库为粒度，与 lineupLibrary.libraryKey 同构），每组的记录组装成一批发给 publish。
       // 解析不了的行直接进确认集：它永远发不出去，留着只会每一轮重新失败。
       const byMode = new Map();
       const corrupt = [];
       for (const s of lines) {
         let rec;
         try { rec = JSON.parse(s); } catch { corrupt.push(s); continue; }
-        const mode = String(rec.modeId || '');
+        const mode = `${rec.modeId || ''}__${String(rec.difficulty || '').toUpperCase()}`;
         if (!byMode.has(mode)) byMode.set(mode, { records: [], lines: [] });
         const g = byMode.get(mode);
         g.records.push(rec);
@@ -138,9 +138,9 @@ export function createLineupOutbox({
       if (!byMode.size) { await confirmDelete(lines); return; } // 全是坏行：清空，无可发送
       let anyOk = false, anyFail = false, slotTaken = false;
       const confirmed = [];
-      for (const [modeId, g] of byMode) {
+      for (const [key, g] of byMode) {
         try {
-          const res = await publish({ dir, modeId, records: g.records });
+          const res = await publish({ dir, key, records: g.records });
           // 409 = 今日该模式的日期键已被占（只增不改）。这**不是**确认：本次这批记录并没有上传，
           // 删掉就是数据丢失。留着等次日的新键（与 publishLibrary 的日粒度对齐），这里只把下一次
           // 尝试推到下一个 UTC 零点之后。
@@ -149,7 +149,7 @@ export function createLineupOutbox({
           else anyFail = true;
         } catch (e) {
           anyFail = true;
-          log.warn?.(`[lineup-outbox] publish ${modeId || '(no mode)'} failed: ${(e && e.message) || e}`);
+          log.warn?.(`[lineup-outbox] publish ${key || '(no key)'} failed: ${(e && e.message) || e}`);
         }
       }
       if (confirmed.length || corrupt.length) await confirmDelete([...confirmed, ...corrupt]);

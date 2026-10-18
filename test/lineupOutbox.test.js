@@ -56,10 +56,10 @@ test('a successful publish confirms and clears exactly those lines', async () =>
     await withEnv({ SP_LINEUP_OUTBOX: null }, async () => {
       await enqueueOutbox(dir, [rec('sig-1'), rec('sig-2')], { mid: 'm' });
       const calls = [];
-      const publish = async ({ modeId, records }) => { calls.push({ modeId, n: records.length }); return { ok: true, status: 200 }; };
+      const publish = async ({ key, records }) => { calls.push({ key, n: records.length }); return { ok: true, status: 200 }; };
       const ob = createLineupOutbox({ dir, publish, log: quiet });
       await ob.syncOnce();
-      assert.deepEqual(calls, [{ modeId: 'coop', n: 2 }]);
+      assert.deepEqual(calls, [{ key: 'coop__HARD', n: 2 }]);
       assert.equal(ob.state().sent, 2);
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false, 'confirmed lines are gone');
       ob.stop();
@@ -128,13 +128,13 @@ test('per-mode grouping: each mode publishes separately; a failing mode does not
     await withEnv({ SP_LINEUP_OUTBOX: null }, async () => {
       await enqueueOutbox(dir, [rec('s1', 'mode_a'), rec('s2', 'mode_a'), rec('s3', 'mode_b')], {});
       const seen = [];
-      const publish = async ({ modeId, records }) => {
-        seen.push([modeId, records.length]);
-        return modeId === 'mode_a' ? { ok: true, status: 200 } : { ok: false, status: 403 };
+      const publish = async ({ key, records }) => {
+        seen.push([key, records.length]);
+        return key === 'mode_a__HARD' ? { ok: true, status: 200 } : { ok: false, status: 403 };
       };
       const ob = createLineupOutbox({ dir, publish, log: quiet });
       await ob.syncOnce();
-      assert.deepEqual(seen.sort(), [['mode_a', 2], ['mode_b', 1]]);
+      assert.deepEqual(seen.sort(), [['mode_a__HARD', 2], ['mode_b__HARD', 1]]);
       const left = readFileSync(join(dir, OUTBOX_NAME), 'utf8').split('\n').filter(Boolean);
       assert.equal(left.length, 1, 'only the failed mode stays queued');
       assert.ok(left[0].includes('"mode_b"'));
@@ -149,10 +149,10 @@ test('corrupt lines are cleared without blocking the valid ones', async () => {
     await withEnv({ SP_LINEUP_OUTBOX: null }, async () => {
       writeFileSync(join(dir, OUTBOX_NAME), `not json at all\n${JSON.stringify({ ...rec('good'), mid: null, outcome: null })}\n`, 'utf8');
       const seen = [];
-      const publish = async ({ modeId, records }) => { seen.push({ modeId, n: records.length }); return { ok: true, status: 200 }; };
+      const publish = async ({ key, records }) => { seen.push({ key, n: records.length }); return { ok: true, status: 200 }; };
       const ob = createLineupOutbox({ dir, publish, log: quiet });
       await ob.syncOnce();
-      assert.deepEqual(seen, [{ modeId: 'coop', n: 1 }]);
+      assert.deepEqual(seen, [{ key: 'coop__HARD', n: 1 }]);
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false, 'the corrupt line got cleaned with the batch');
       ob.stop();
     });
@@ -205,7 +205,7 @@ test('end-to-end: a settled match (flushMatchLineups) queues the outbox next to 
       recordPrepLineups(m);
       flushMatchLineups(m, { victory: true, reason: 'victory' });
       await new Promise((r) => setTimeout(r, 150)); // both the library append and the queue are fire-and-forget
-      assert.ok(existsSync(join(dir, 'lineups_coop.jsonl')), 'the local library kept its line');
+      assert.ok(existsSync(join(dir, 'lineups_coop__HARD.jsonl')), 'the local library kept its line');
       const queued = readFileSync(join(dir, OUTBOX_NAME), 'utf8').split('\n').filter(Boolean);
       assert.equal(queued.length, 1);
       assert.equal(JSON.parse(queued[0]).mid, 'bp-7');
@@ -225,7 +225,7 @@ test('an abandoned settlement queues nothing (the outcome gate comes before the 
       flushMatchLineups(m, { victory: false, reason: 'abandoned' });
       await new Promise((r) => setTimeout(r, 100));
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false);
-      assert.equal(existsSync(join(dir, 'lineups_coop.jsonl')), false, 'the library gate is unchanged');
+      assert.equal(existsSync(join(dir, 'lineups_coop__HARD.jsonl')), false, 'the library gate is unchanged');
     });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
