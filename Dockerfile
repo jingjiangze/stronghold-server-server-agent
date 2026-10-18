@@ -15,11 +15,13 @@
 # Run:  docker run -d --name stronghold -p 3000:3000 --restart unless-stopped stronghold-protocol
 # Env:  PORT (3000), HOST (0.0.0.0), SP_COMBAT (client|server), SP_VERIFY (off|sample|all), TRUST_PROXY (auto|1|0), DEBUG
 #
+# 这是**通用**形态：游戏进程直接对外监听 3000，没有边缘层。魔搭创空间要的
+# 「nginx 占 7860 + 游戏退到 3120」拓扑在 `docker` 分支的 Dockerfile 里（那份还要 tools/deploy-ms 叠加层）。
+#
 # 持久卷（AI 布阵学习库）：镜像不 COPY 任何学习库内容（它是运行时产物，见 server/lineupLibrary.js），
 # 所以这里挂一个**空卷**不会遮掉镜像里的任何东西 —— 想跨容器重建保留学习库就挂它：
 #     -v "$PWD/lineups:/app/lineups"
 # 环境变量 SP_LINEUP_LIBRARY 默认已指向该目录；不挂卷则库写在容器的可写层里，容器重建即丢。
-# ModelScope 创空间（Dockerfile.ms）同样有这个默认值，但平台不给持久卷，所以那边是易失存储 ——
 # 部署形态的完整说明见 docs/DEPLOY.md「AI 布阵学习库」。
 
 ARG NODE_IMAGE=node:22-alpine
@@ -50,29 +52,9 @@ RUN node tools/vendor.mjs \
 
 # ---- 3. runtime ---------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE}
-# 边缘层：普通的 nginx 做分流，素材的判定在 edge-sidecar.mjs（一个 Node 进程）里。
-# 刻意**不用** nginx 的 Lua 模块（Stardust 的 openi-resolver 也是这个形状）：那是动态模块，
-# 配置里少一行 include 就会让所有 lua_* 变成未知指令、nginx 直接起不来；换成普通 nginx
-# 就没有这个失败模式，而且那段逻辑能用 node --test 直接测。
-# 用 aliyun 镜像源：构建机在境内，alpine 官方源实测不可达；万一 aliyun 也不通就退回原源，
-# 不让一个镜像站的可用性把整个构建钉死。
-RUN cp /etc/apk/repositories /tmp/repos.bak \
- && sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories \
- && (apk add --no-cache nginx \
-     || { cp /tmp/repos.bak /etc/apk/repositories; apk add --no-cache nginx; }) \
- && mkdir -p /tmp/sp-edge \
- && chown -R node:node /tmp/sp-edge
-
-# ModelScope 创空间要求容器监听 0.0.0.0:7860，且端口不可改
-# (deploy_schema.json: port.const = 7860；8080 被平台进程占用)
-# nginx 占 7860（对外）；游戏与素材解析器退到内部端口，端口号照抄 Stardust 的
-# compose（游戏 3120 / 解析器 3130），这样两边配置能逐行对照。
 ENV NODE_ENV=production \
-    SP_PUBLIC_PORT=7860 \
-    SP_GAME_PORT=3120 \
-    SP_EDGE_PORT=3130 \
-    PORT=3120 \
-    HOST=127.0.0.1 \
+    PORT=3000 \
+    HOST=0.0.0.0 \
     SP_LINEUP_LIBRARY=/app/lineups
 WORKDIR /app
 COPY --from=deps /app/package.json ./package.json
@@ -83,24 +65,12 @@ COPY --from=build /app/data ./data
 COPY --from=build /app/public ./public
 # research tables: read by server/sim/nodeData.js as a fallback
 COPY --from=build /app/docs/research ./docs/research
-# 边缘层：配置、解析器与入口。nginx.conf / sources.json 是数据，edge-sidecar.mjs 是决策。
-COPY deploy/stardust/ms-edge/nginx.conf /app/deploy/stardust/ms-edge/nginx.conf
+# server/http/asset-jump.js imports the edge sidecar's pure functions (one implementation of the whitelist /
+# path checks / ?sp_source override — the module says never to copy it), so the file ships even without nginx.
 COPY deploy/stardust/ms-edge/edge-sidecar.mjs /app/deploy/stardust/ms-edge/edge-sidecar.mjs
-COPY deploy/stardust/ms-edge/render-nginx.mjs /app/deploy/stardust/ms-edge/render-nginx.mjs
-COPY deploy/stardust/ms-edge/sources.json /app/deploy/stardust/ms-edge/sources.json
-COPY deploy/stardust/ms-edge/entrypoint.sh /app/deploy/stardust/ms-edge/entrypoint.sh
-
-# 构建期就验一次，而不是让容器上线后崩在起不来：一个坏的 nginx 配置或一份渲染不出的
-# sources.json 应该让这次构建失败（旧镜像继续服务），而不是产出一个 restart 循环的镜像。
-# 顺序要紧：先渲染 sources-nginx.conf，否则 nginx.conf 里的 include 扑空、nginx -t 必红。
-# （还有一道运行期同款检查在 entrypoint.sh：过不了就整体退回「游戏直接占 7860」。）
-RUN chmod +x /app/deploy/stardust/ms-edge/entrypoint.sh \
- && node /app/deploy/stardust/ms-edge/render-nginx.mjs /app/deploy/stardust/ms-edge/sources-nginx.conf \
- && nginx -t -c /app/deploy/stardust/ms-edge/nginx.conf
 
 USER node
-EXPOSE 7860
-# 探的是对外那个口，因为现在 7860 是 nginx：它活着且能代理到游戏，才算这个容器健康。
+EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -q -O /dev/null "http://127.0.0.1:7860/healthz" || exit 1
-CMD ["/app/deploy/stardust/ms-edge/entrypoint.sh"]
+  CMD wget -q -O /dev/null "http://127.0.0.1:3000/healthz" || exit 1
+CMD ["node", "server/index.js"]
