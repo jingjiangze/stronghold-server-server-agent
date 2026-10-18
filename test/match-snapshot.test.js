@@ -67,3 +67,47 @@ test('checkSnapshotSet wants every expected player and reports who is missing', 
   assert.ok(out.errors.some((e) => e.includes('p_3')));
   assert.equal(checkSnapshotSet([good()], { expectedPlayers: ['p_1'] }).ok, true);
 });
+
+// ---- 恢复包：魔搭等「容器重启即清盘」的部署靠客户端携带状态 -------------------------------------
+
+import { sanitizeBundle, agreeOnBundles, BUNDLE_VERSION } from '../shared/matchSnapshot.mjs';
+
+const bundle = (over = {}, snapOver = {}) => ({
+  v: BUNDLE_VERSION, seed: 123456789, mode: 'coop', difficulty: 'HARD', modeId: 'mode_multi_hard',
+  snapshot: good(snapOver), ...over,
+});
+
+test('bundle: seed / mode / difficulty / modeId are mandatory and the snapshot is sanitized', () => {
+  assert.equal(sanitizeBundle(bundle()).ok, true);
+  assert.equal(sanitizeBundle(bundle({ seed: -1 })).ok, false, 'seed must be uint32');
+  assert.equal(sanitizeBundle(bundle({ seed: 1.5 })).ok, false);
+  assert.equal(sanitizeBundle(bundle({ mode: '' })).ok, false);
+  assert.equal(sanitizeBundle(bundle({ v: 99 })).ok, false);
+  const r = sanitizeBundle(bundle({ evil: 'x' }));
+  assert.equal(r.ok, true);
+  assert.equal('evil' in r.bundle, false);
+});
+
+test('bundles agree only when they describe the same match (seed included)', () => {
+  const a = bundle({}, { playerId: 'p_1' });
+  const b = bundle({}, { playerId: 'p_2' });
+  const ok = agreeOnBundles([a, b]);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.meta.seed, 123456789);
+  assert.equal(ok.snapshots.length, 2);
+
+  const bad = agreeOnBundles([a, bundle({ seed: 42 }, { playerId: 'p_2' })]);
+  assert.equal(bad.ok, false, 'a different seed is a different match — refuse to recover');
+  assert.ok(bad.conflicts.some((c) => c.startsWith('seed')));
+
+  const otherRoom = agreeOnBundles([a, bundle({}, { playerId: 'p_2', roomCode: 'ZZZZ' })]);
+  assert.equal(otherRoom.ok, false);
+  assert.ok(otherRoom.conflicts.some((c) => c.startsWith('roomCode')));
+});
+
+test('a set with no valid bundle refuses recovery; malformed ones are reported', () => {
+  const none = agreeOnBundles([{ v: 1 }]);
+  assert.equal(none.ok, false);
+  assert.ok(none.errors.length > 0);
+  assert.equal(agreeOnBundles([]).ok, false);
+});
