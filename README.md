@@ -118,6 +118,7 @@ npm start          # 启动服务器：http://localhost:3000
 | `SP_VERIFY` | `off` | 服务器复算客户端上报的战斗结果：`off` / `sample`（约 1/8 抽查）/ `all`（全部复算，更耗 CPU） |
 | `SP_BOT_REHEARSAL` | `off` | `host`：让房主浏览器帮 AI 队友试算布阵，减轻服务器负担；无法完成时由服务器计算。默认 `off`，由服务器计算。真人「AI 托管」不受影响 |
 | `SP_LINEUP_LIBRARY` | 空 | 设为一个 JSONL 文件路径即开启「AI 学习真人布阵」：每次整备结束把**真人**的最终布阵（含朝向）追加记录到该文件；AI 队友整备时会检索同关卡 / 同难度 / 同回合记录到的真人布阵，映射到自己抽到的干员后作为额外候选交给布阵试算模拟择优——只有模拟打得赢现有候选才会被选中，因此学习只会变强不会变弱；试算候选数仍受数量上限约束，CPU 开销不随记录增长。**目录形态下按「玩法 + 难度」各自成库**：`<dir>/lineups_<modeId>__<DIFFICULTY>.jsonl`（如 `lineups_mode_single_hard__HARD.jsonl`），不同玩法、不同难度互不影响；老的单文件/每模式布局仍可读，升级用 `node tools/migrate-lineups.mjs <库目录> --apply` 拆分。不设置则完全不记录、不学习，行为与默认完全一致 |
+| `SP_LINEUP_MODE` | `local` | 学习库形态。`local`（**默认**）：本机记录真人布阵并走专用通道上传到 CDN/R2（`SP_LINEUP_PUBLISH_URL`，默认 `https://downcdn.jiangjiangze.icu`）；`public`：只读远端——优先 R2 稳定别名、GitHub 镜像兜底，适合魔搭等易失容器；`off`：彻底关闭（不记录、不读、不上传）。显式设了 `SP_LINEUP_LIBRARY` 时以它为准 |
 | `SP_LINEUP_OUTBOX` | 开 | 增量补传队列（`<库目录>/outbox.jsonl`）：每局结算的真人布阵先落本地库、同时入队；定时器把积压按模式发成 `packs/lineup-library/<模式>-<日期>.jsonl`（与发布走同一条专用数据通道、同一口令口径 `CDN_ADMIN_KEY`），**发布成功（含同日键已存在的 409）才删行**——断网期间积压、恢复后自动续传。设为 `0` 关闭（不建队列、不入队；本地库不受影响）。没有口令时记录照常积压、不发请求 |
 | `SP_LINEUP_OUTBOX_MS` | `900000` | 补传间隔（毫秒，默认 15 分钟）；失败按指数退避（上限 1 小时），绝不影响对局 |
 | `SP_PLATFORM_URL` | `https://p2p.jiangjiangze.icu` | openp2p 握手平台基址（`0` / `off` 关闭）。**只在设了 `SP_PLATFORM_HOSTNODE` 或 `SP_PLATFORM_UPSTREAM` 时生效**：房主开房后服务端 POST `/api/room` 登记，平台把返回的 `joinUrl` 作为 `room.state.inviteUrl` 广播给房间。平台只回一条 302，游戏流量不经它 |

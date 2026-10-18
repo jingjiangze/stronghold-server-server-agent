@@ -174,6 +174,45 @@ test('a backlog of only corrupt lines is cleared without a publish call', async 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('requestFlush: a settle triggers an upload right away, coalesced inside the debounce window', async () => {
+  const dir = tempDir();
+  try {
+    await withEnv({ SP_LINEUP_OUTBOX: null }, async () => {
+      await enqueueOutbox(dir, [rec('sig-1')], { mid: 'm' });
+      let calls = 0;
+      const publish = async () => { calls++; return { ok: true, status: 200 }; };
+      const ob = createLineupOutbox({ dir, publish, log: quiet, flushDebounceMs: 20 });
+      ob.requestFlush(); ob.requestFlush(); ob.requestFlush(); // three settles burst in
+      await new Promise((r) => setTimeout(r, 150));
+      assert.equal(calls, 1, 'the window collapses a burst into one upload');
+      assert.equal(existsSync(join(dir, OUTBOX_NAME)), false);
+      ob.stop();
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the settle path asks for a flush through the hook (setLineupFlushHook)', async () => {
+  const dir = tempDir();
+  try {
+    const { recordPrepLineups, flushMatchLineups, setLineupFlushHook } = await import('../server/lineupLibrary.js');
+    await withEnv({ SP_LINEUP_LIBRARY: dir, SP_LINEUP_OUTBOX: null }, async () => {
+      let flushed = 0;
+      setLineupFlushHook(() => { flushed++; });
+      try {
+        const board = new Map([['9,3', { kind: 'chess', id: 'a', dir: 'UP' }], ['9,4', { kind: 'chess', id: 'b', dir: 'LEFT' }]]);
+        const m = { modeId: 'coop', stageId: 's1', difficulty: 'HARD', round: 3, gd: { isGolden: () => false }, alivePlayers: () => [{ botControlled: false, board }] };
+        recordPrepLineups(m);
+        flushMatchLineups(m, { victory: true, reason: 'victory' });
+        assert.equal(flushed, 1, 'a settled batch asks for an immediate flush');
+        // an abandoned settlement queues nothing, so it must not ask either
+        recordPrepLineups(m);
+        flushMatchLineups(m, { victory: false, reason: 'abandoned' });
+        assert.equal(flushed, 1);
+      } finally { setLineupFlushHook(null); }
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('the outbox cap: an over-size backlog drops its oldest quarter, not the newest', async () => {
   const dir = tempDir();
   try {
