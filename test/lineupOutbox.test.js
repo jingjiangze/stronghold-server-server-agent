@@ -183,7 +183,11 @@ test('requestFlush: a settle triggers an upload right away, coalesced inside the
       const publish = async () => { calls++; return { ok: true, status: 200 }; };
       const ob = createLineupOutbox({ dir, publish, log: quiet, flushDebounceMs: 20 });
       ob.requestFlush(); ob.requestFlush(); ob.requestFlush(); // three settles burst in
-      await new Promise((r) => setTimeout(r, 150));
+      // the debounce fires on a timer and the upload itself is async: poll instead of a fixed sleep (a loaded
+      // CI runner can take longer than 150 ms to get through read + publish)
+      const deadline = Date.now() + 3000;
+      while (!calls && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 100)); // give a (wrong) second upload a chance to show up
       assert.equal(calls, 1, 'the window collapses a burst into one upload');
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false);
       ob.stop();
