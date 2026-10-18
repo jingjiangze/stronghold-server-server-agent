@@ -360,6 +360,12 @@ export function dropStagedLineups() {
  * @param {import('./match/Match.js').Match} m
  * @param {{victory?: boolean, reason?: string}} [outcome]
  */
+/** 结算后通知上层的「立即补传」（由 index.js 接到 outbox.requestFlush；未接入时为空）。 */
+let flushHook = null;
+
+/** @param {(() => void) | null} fn */
+export function setLineupFlushHook(fn) { flushHook = typeof fn === 'function' ? fn : null; }
+
 export function flushMatchLineups(m, outcome) {
   const usable = !outcome || USABLE_REASONS.has(outcome.reason);
   const batch = usable ? staged.splice(0, staged.length) : [];
@@ -378,6 +384,8 @@ export function flushMatchLineups(m, outcome) {
   if (queued.length && outboxEnabled() && !lineupRemoteSpec()) {
     const dir = lineupDir();
     if (dir) void enqueueOutbox(dir, queued, { mid: m?.battlePrefix ?? null, outcome: outcome && { victory: !!outcome.victory, reason: outcome.reason } });
+    // 结算即触发补传（不再等 15 分钟的定时器）：合并窗口由 outbox 自己控制，失败只影响本轮。
+    try { flushHook?.(); } catch { /* a broken hook must never fail a settle */ }
   }
   void m; // the match is the caller's anchor; the records carry their own stageId/difficulty/round
 }

@@ -328,8 +328,8 @@ services:
 | 值 | 读到什么 | 写回 |
 |---|---|---|
 | `public` | 只读公共镜像：R2 稳定别名优先、GitHub 镜像兜底（走 `ghfast.top`），缓存落系统临时目录 | 不写回（remote 规格的服务器是纯读者） |
-| `local` | 本机目录（非 Docker 为 `<server>/lineups`；镜像里是 `/app/lineups`，可挂卷） | 可写回（配合上传口令 / outbox） |
-| 不设 | 功能关闭 | — |
+| `local`（默认） | 本机目录（非 Docker 为 `<server>/lineups`；镜像里是 `/app/lineups`，可挂卷） | 可写回（配合上传口令 / outbox） |
+| 不设 | **默认 = local**（记录 + 上传到 CDN/R2） | 可写回 |
 
 ```bash
 # 只读公共托管：不占本地磁盘，容器重建不丢数据

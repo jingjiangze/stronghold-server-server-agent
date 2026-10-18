@@ -44,7 +44,7 @@ import { createUpstreamWatch } from './upstreamWatch.js';
 import { createLineupSync } from './lineupSync.js';
 import { publishLibrary, publishOneMode } from './lineupPublish.js';
 import { createLineupOutbox, outboxEnabled } from './lineupOutbox.js';
-import { lineupRemoteSpec, reloadLibrary, lineupDir } from './lineupLibrary.js';
+import { lineupRemoteSpec, reloadLibrary, lineupDir, setLineupFlushHook } from './lineupLibrary.js';
 
 /**
  * The libraries a remote lineup library is pulled for: `<modeId>__<DIFFICULTY>` (lineupLibrary.libraryKey).
@@ -117,17 +117,19 @@ export async function startServer(opts = {}) {
   // with SP_UPSTREAM_TOKEN it also dispatches the existing workflow_dispatch chains on a real change.
   const upstreamWatch = createUpstreamWatch({ log });
   upstreamWatch.start();
-  // SP_LINEUP_MODE is sugar over SP_LINEUP_LIBRARY — an explicit LIBRARY always wins, and everything below is
-  // untouched: `public` becomes a remote spec (a reader by construction, never publishes), `local` becomes a
-  // directory that may publish back. An unknown value leaves the feature off and says so once.
-  if (!process.env.SP_LINEUP_LIBRARY && process.env.SP_LINEUP_MODE) {
-    const mode = String(process.env.SP_LINEUP_MODE).trim().toLowerCase();
+  // SP_LINEUP_MODE 是 SP_LINEUP_LIBRARY 的语法糖（显式设置了 LIBRARY 时以 LIBRARY 为准）。
+  // 默认 = local：本机记录真人布阵，并走 lineupPublish 的专用通道上传（默认 downcdn，即你的 R2）；
+  // 只读部署（魔搭）显式设 public（R2 稳定别名优先、GitHub 镜像兜底）；off 彻底关闭。
+  if (!process.env.SP_LINEUP_LIBRARY) {
+    const mode = String(process.env.SP_LINEUP_MODE || 'local').trim().toLowerCase();
     if (mode === 'public') {
       process.env.SP_LINEUP_LIBRARY = `remote:${DEFAULT_PUBLIC_LINEUP_BASES}|${join(tmpdir(), 'stronghold-lineups')}`;
     } else if (mode === 'local') {
       process.env.SP_LINEUP_LIBRARY = join(ROOT, 'lineups');
+    } else if (mode === 'off') {
+      // 显式关闭：什么都不做（不记录、不读、不上传）
     } else {
-      log.warn?.(`[lineup] SP_LINEUP_MODE=${mode} 不认识（只支持 public / local）——学习库关闭`);
+      log.warn?.(`[lineup] SP_LINEUP_MODE=${mode} 不认识（只支持 public / local / off）——学习库关闭`);
     }
   }
   // The lineup library (SP_LINEUP_LIBRARY=remote:...) is a read-only remote pulled into a local cache here. Same
@@ -185,6 +187,8 @@ export async function startServer(opts = {}) {
     })
     : null;
   if (lineupOutbox) lineupOutbox.start();
+  // 结算后立即补传（outbox 内部再合并 3 秒窗口）：不再等 15 分钟的定时器。
+  setLineupFlushHook(lineupOutbox ? () => lineupOutbox.requestFlush() : null);
   const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, traffic, assetIndex, views, getHealthMetrics: () => healthMetrics }, log, trustProxy: network.opts.trustProxy }));
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log, traffic });
