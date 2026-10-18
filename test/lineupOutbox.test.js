@@ -32,7 +32,7 @@ test('feature off (SP_LINEUP_OUTBOX=0): enqueue does nothing — no file, no thr
       await enqueueOutbox(dir, [rec()], { mid: 'm1' });
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false);
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('a queued batch lands in outbox.jsonl with the envelope fields', async () => {
@@ -47,7 +47,7 @@ test('a queued batch lands in outbox.jsonl with the envelope fields', async () =
       assert.deepEqual(doc.outcome, { victory: true, reason: 'victory' });
       assert.equal(doc.sig, 'sig-1');
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('a successful publish confirms and clears exactly those lines', async () => {
@@ -64,7 +64,7 @@ test('a successful publish confirms and clears exactly those lines', async () =>
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false, 'confirmed lines are gone');
       ob.stop();
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('409 (today\'s key already taken) DEFERS the batch — the lines stay queued for the next UTC day', async () => {
@@ -84,7 +84,7 @@ test('409 (today\'s key already taken) DEFERS the batch — the lines stay queue
       assert.equal(ob.state().ticks, 1, 'the second call is inside the deferral window');
       ob.stop();
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('offline: a failed publish keeps the backlog, the retry drains it (优先到本地，连不上则下次)', async () => {
@@ -105,7 +105,7 @@ test('offline: a failed publish keeps the backlog, the retry drains it (优先�
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false);
       ob.stop(); ob2.stop();
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('a non-ok answer holds that mode\'s records (a 403 keeps them for tomorrow)', async () => {
@@ -119,7 +119,7 @@ test('a non-ok answer holds that mode\'s records (a 403 keeps them for tomorrow)
       assert.equal(readFileSync(join(dir, OUTBOX_NAME), 'utf8').split('\n').filter(Boolean).length, 1);
       ob.stop();
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('per-mode grouping: each mode publishes separately; a failing mode does not block a good one', async () => {
@@ -140,7 +140,7 @@ test('per-mode grouping: each mode publishes separately; a failing mode does not
       assert.ok(left[0].includes('"mode_b"'));
       ob.stop();
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('corrupt lines are cleared without blocking the valid ones', async () => {
@@ -156,7 +156,7 @@ test('corrupt lines are cleared without blocking the valid ones', async () => {
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false, 'the corrupt line got cleaned with the batch');
       ob.stop();
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('a backlog of only corrupt lines is cleared without a publish call', async () => {
@@ -171,7 +171,7 @@ test('a backlog of only corrupt lines is cleared without a publish call', async 
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false);
       ob.stop();
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('requestFlush: a settle triggers an upload right away, coalesced inside the debounce window', async () => {
@@ -192,7 +192,7 @@ test('requestFlush: a settle triggers an upload right away, coalesced inside the
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false);
       ob.stop();
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('the settle path asks for a flush through the hook (setLineupFlushHook)', async () => {
@@ -214,7 +214,7 @@ test('the settle path asks for a flush through the hook (setLineupFlushHook)', a
         assert.equal(flushed, 1);
       } finally { setLineupFlushHook(null); }
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('the outbox cap: an over-size backlog drops its oldest quarter, not the newest', async () => {
@@ -231,7 +231,7 @@ test('the outbox cap: an over-size backlog drops its oldest quarter, not the new
       assert.ok(after.some((l) => l.includes('"k7999"')), 'the recent lines survive');
       assert.ok(!after.some((l) => /"k0"/.test(l)), 'the oldest line is gone');
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('end-to-end: a settled match (flushMatchLineups) queues the outbox next to the library', async () => {
@@ -254,7 +254,7 @@ test('end-to-end: a settled match (flushMatchLineups) queues the outbox next to 
       assert.equal(JSON.parse(queued[0]).mid, 'bp-7');
       assert.equal(JSON.parse(queued[0]).outcome.reason, 'victory');
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
 
 test('an abandoned settlement queues nothing (the outcome gate comes before the queue)', async () => {
@@ -270,5 +270,5 @@ test('an abandoned settlement queues nothing (the outcome gate comes before the 
       assert.equal(existsSync(join(dir, OUTBOX_NAME)), false);
       assert.equal(existsSync(join(dir, 'lineups_coop__HARD.jsonl')), false, 'the library gate is unchanged');
     });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });
