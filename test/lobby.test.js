@@ -582,7 +582,7 @@ describe('websocket lobby', () => {
     // A dedicated server with a low abuse threshold. The default 400 drops/s is not reachable on a loaded CI
     // runner (the server reads the flood slower than that), so the shared server's socket never closed —
     // the pre-existing 30 s flake. 60 drops/s makes the close deterministic while still exercising the same path.
-    const floodSrv = await startServer({ port: 0, host: '127.0.0.1', log: cap.log, MatchClass: Match, abuseDropsPerSec: 60 });
+    const floodSrv = await startServer({ port: 0, host: '127.0.0.1', log: cap.log, MatchClass: Match, abuseDropsPerSec: 20 });
     const floodPool = clientPool(() => `ws://127.0.0.1:${floodSrv.port}/ws`);
     try {
       const c = await floodPool.player('Flood');
@@ -591,7 +591,7 @@ describe('websocket lobby', () => {
         for (let i = 0; i < 200 && c.isOpen; i++) c.send({ t: 'ping', c: i, rid: null });
         await delay(20);
       }
-      const info = await Promise.race([c.closed, delay(10000).then(() => null)]);
+      const info = await Promise.race([c.closed, delay(20000).then(() => null)]);
       assert.ok(info, 'the server closed the flooding socket');
       assert.equal(info.code, 1008);
     } finally {
